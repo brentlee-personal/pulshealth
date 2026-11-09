@@ -145,3 +145,23 @@ func TestIntegration_FamilyHealthCanonicalJSONBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegration_FamilyHealthRequiredWorkoutFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, detail string
+		status       int
+	}{
+		{"missing duration", `{"activityType":"running"}`, http.StatusBadRequest},
+		{"missing activity duration", `{"activityType":"running","duration":60,"activities":[{"activityType":"running","start":1718000000000}]}`, http.StatusBadRequest},
+		{"explicit zero duration", `{"activityType":"running","duration":0}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := familyTestSetup(t)
+			body := strings.Split(f.body(f.uuid(0x780), f.uuid(0x781), 62.5), "\n")[0] + "\n"
+			body += `{"uuid":"` + f.uuid(0x781) + `","type":"HKWorkoutTypeIdentifier","kind":"workout","start":1718000000000,"end":1718000005000,"workout":` + tc.detail + "}\n"
+			if status, _ := f.post(t, f.actors[0], body); status != tc.status {
+				t.Errorf("required source field status=%d, want %d", status, tc.status)
+			}
+		})
+	}
+}
