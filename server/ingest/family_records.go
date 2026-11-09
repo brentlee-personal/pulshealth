@@ -121,6 +121,10 @@ func normalizeFamilySample(sample *Sample) (familyRecordContent, []byte, []byte,
 	}
 	content.SourceTimeZone, content.SourceOffset = familyTimeFacts(sample.StartContext)
 	content.SourceEndTimeZone, content.SourceEndOffset = familyTimeFacts(sample.EndContext)
+	return fingerprintFamilyRecord(content, sample.SourceVersion)
+}
+
+func fingerprintFamilyRecord(content familyRecordContent, appVersion *string) (familyRecordContent, []byte, []byte, error) {
 	data, err := json.Marshal(content)
 	if err != nil {
 		return content, nil, nil, err
@@ -137,62 +141,49 @@ func normalizeFamilySample(sample *Sample) (familyRecordContent, []byte, []byte,
 	delete(facts, "value")
 	delete(facts, "original_value")
 	// Creator app versions are trace facts, not provider record revisions.
-	facts["source_app_version"] = familyStringFact(sample.SourceVersion)
+	facts["source_app_version"] = familyStringFact(appVersion)
 	factsJSON, err := json.Marshal(facts)
 	return content, digest[:], factsJSON, err
 }
 
-func claimFamilySamples(ctx context.Context, tx pgx.Tx, batch *Batch, userID, sourceID, credentialID string) error {
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 360006))", userID+":"+sourceID); err != nil {
-		return err
+type familyRecordPosition struct {
+	rawSourceID    string
+	table          string
+	uuid           *string
+	parentUUID     *string
+	typeIdentifier *string
+	start, end     time.Time
+}
+
+func claimFamilyRecord(ctx context.Context, tx pgx.Tx, batchID, userID, sourceID, credentialID string,
+	content familyRecordContent, digest, facts []byte, position familyRecordPosition) (*string, error) {
+	_, err := tx.Exec(ctx, `INSERT INTO family_record_identity
+		(user_id,source_connection_id,record_type,source_record_id,raw_source_record_id,
+		 payload_digest,physical_table,physical_uuid,physical_start,physical_end,
+		 source_facts,first_credential_id,first_batch_id,physical_parent_uuid,physical_type)
+		VALUES($1,$2,$3,$4,$5,$6,$7,
+		 CASE WHEN $14::uuid IS NOT NULL THEN NULL ELSE coalesce($8::uuid,gen_random_uuid()) END,
+		 $9,$10,$11::jsonb,$12,$13,$14,$15)
+		ON CONFLICT(user_id,source_connection_id,record_type,source_record_id) DO NOTHING`,
+		userID, sourceID, content.RecordType, content.SourceRecordID, position.rawSourceID, digest,
+		position.table, position.uuid, position.start, position.end, facts, credentialID, batchID,
+		position.parentUUID, position.typeIdentifier)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, errRecordConflict
+		}
+		return nil, err
 	}
-	for i := range batch.Samples {
-		sample := &batch.Samples[i]
-		content, digest, facts, err := normalizeFamilySample(sample)
-		if err != nil {
-			return err
-		}
-		table, _, ok := tableForKind(sample.Kind)
-		if !ok {
-			return errFamilyRecord
-		}
-		var unbound bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+` h
-			WHERE h.user_id=$1 AND h.uuid=$2
-			AND NOT EXISTS(SELECT 1 FROM family_record_identity r
-				WHERE r.user_id=h.user_id AND r.physical_table=$3 AND r.physical_uuid=h.uuid))`,
-			userID, sample.UUID, table).Scan(&unbound); err != nil {
-			return err
-		}
-		if unbound {
-			return errSourceBinding
-		}
-		// shortcut: raw UUIDs remain physical IDs until source-scoped remapping;
-		// collisions fail closed instead of silently dropping another source.
-		_, err = tx.Exec(ctx, `INSERT INTO family_record_identity
-			(user_id,source_connection_id,record_type,source_record_id,raw_source_record_id,
-			 payload_digest,physical_table,physical_uuid,physical_start,physical_end,
-			 source_facts,first_credential_id,first_batch_id)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)
-			ON CONFLICT(user_id,source_connection_id,record_type,source_record_id) DO NOTHING`,
-			userID, sourceID, sample.Type, content.SourceRecordID, sample.UUID, digest, table,
-			sample.UUID, msToTime(sample.Start), msToTime(sample.End), facts, credentialID, batch.Header.BatchID)
-		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				return errRecordConflict
-			}
-			return err
-		}
-		var stored []byte
-		if err := tx.QueryRow(ctx, `SELECT payload_digest FROM family_record_identity
-			WHERE user_id=$1 AND source_connection_id=$2 AND record_type=$3 AND source_record_id=$4`,
-			userID, sourceID, sample.Type, content.SourceRecordID).Scan(&stored); err != nil {
-			return err
-		}
-		if !bytes.Equal(stored, digest) {
-			return errRecordConflict
-		}
+	var stored []byte
+	var physical *string
+	if err := tx.QueryRow(ctx, `SELECT payload_digest,physical_uuid::text FROM family_record_identity
+		WHERE user_id=$1 AND source_connection_id=$2 AND record_type=$3 AND source_record_id=$4`,
+		userID, sourceID, content.RecordType, content.SourceRecordID).Scan(&stored, &physical); err != nil {
+		return nil, err
 	}
-	return nil
+	if !bytes.Equal(stored, digest) {
+		return nil, errRecordConflict
+	}
+	return physical, nil
 }

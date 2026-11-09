@@ -55,7 +55,7 @@ const (
 // one revoked token, both for deviceUser.
 func newDeviceTestServer(fs *fakeStore, allowShared bool) (*Server, *fakeResolver) {
 	fr := newFakeResolver()
-	fr.add(activeTok, deviceToken{ID: 7, UserID: deviceUser, Status: "active"})
+	fr.add(activeTok, deviceToken{ID: 7, UserID: deviceUser, Status: "active", SourceConnectionID: "00000000-0000-4000-8000-000000000010", SourceActive: true})
 	fr.add(revokedTok, deviceToken{ID: 8, UserID: deviceUser, Status: "revoked"})
 	srv := newServer(fs, fr, "secret", allowShared, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	return srv, fr

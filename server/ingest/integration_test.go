@@ -133,7 +133,7 @@ func TestIntegration_IngestRoundTrip(t *testing.T) {
 	}
 
 	// Stats should include our types with sane bounds.
-	stats, err := store.Stats(ctx, defaultUserID)
+	stats, err := store.Stats(ctx, recordScope{userID: defaultUserID})
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 	}
 
 	// Stats must report the hardcoded identifiers for the new tables.
-	stats, err := store.Stats(ctx, defaultUserID)
+	stats, err := store.Stats(ctx, recordScope{userID: defaultUserID})
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
 	}
@@ -965,7 +965,7 @@ func TestIntegration_ReadEndpointsAreUserScoped(t *testing.T) {
 
 	from, to := start.Add(-time.Hour), start.Add(time.Hour)
 	for _, f := range fixtures {
-		stats, err := store.Stats(ctx, f.userID)
+		stats, err := store.Stats(ctx, recordScope{userID: f.userID})
 		if err != nil {
 			t.Fatalf("Stats(%s): %v", f.userID, err)
 		}
@@ -979,11 +979,11 @@ func TestIntegration_ReadEndpointsAreUserScoped(t *testing.T) {
 			t.Fatalf("Stats(%s) type rows = %d, want 1", f.userID, typeRows)
 		}
 
-		digest, err := store.Digest(ctx, f.userID, typeIdent, from, to)
+		digest, err := store.Digest(ctx, recordScope{userID: f.userID}, typeIdent, from, to)
 		if err != nil || len(digest) != 1 || digest[0].Rows != 1 {
 			t.Fatalf("Digest(%s) = %+v, %v", f.userID, digest, err)
 		}
-		uuids, err := store.UUIDs(ctx, f.userID, typeIdent, from, to)
+		uuids, err := store.UUIDs(ctx, recordScope{userID: f.userID}, typeIdent, from, to)
 		if err != nil || len(uuids) != 1 || uuids[0] != f.sampleUUID {
 			t.Fatalf("UUIDs(%s) = %v, %v", f.userID, uuids, err)
 		}

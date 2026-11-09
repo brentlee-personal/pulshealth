@@ -82,7 +82,8 @@ func TestIntegration_FamilyHealthSameRecordIDAcrossSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	sample := f.uuid(0x740)
-	for i, credential := range []familyTestActor{actor, {user: actor.user, token: plain}} {
+	actors := []familyTestActor{actor, {user: actor.user, token: plain}}
+	for i, credential := range actors {
 		if status, _ := f.post(t, credential, f.body(f.uuid(0x741+i), sample, 62.5+float64(i)*10)); status != http.StatusOK {
 			t.Fatalf("source %d status=%d", i, status)
 		}
@@ -93,6 +94,35 @@ func TestIntegration_FamilyHealthSameRecordIDAcrossSources(t *testing.T) {
 	}
 	if !reflect.DeepEqual(values, []float64{62.5, 72.5}) {
 		t.Error("independent sources did not preserve both records with the same raw ID")
+	}
+	for _, credential := range actors {
+		var ids []string
+		path := "/v1/uuids?type=HKQuantityTypeIdentifierHeartRate&from=1717977600000&to=1718150400000"
+		if status := f.get(t, credential, path, &ids); status != http.StatusOK || !reflect.DeepEqual(ids, []string{sample}) {
+			t.Fatalf("source UUIDs status=%d, ids=%v", status, ids)
+		}
+		var windows []DigestWindow
+		if status := f.get(t, credential, strings.Replace(path, "/uuids?", "/digest?", 1), &windows); status != http.StatusOK || len(windows) != 1 || windows[0].Rows != 1 || windows[0].Digest != strings.ReplaceAll(sample, "-", "") {
+			t.Fatalf("source digest status=%d, windows=%v", status, windows)
+		}
+		var stats []TypeStats
+		if status := f.get(t, credential, "/v1/stats", &stats); status != http.StatusOK || len(stats) != 1 || stats[0].Rows != 1 {
+			t.Fatalf("source stats status=%d, stats=%v", status, stats)
+		}
+	}
+	deleteLine := `{"deleted":{"uuid":"` + sample + `","type":"HKQuantityTypeIdentifierHeartRate"}}`
+	deletedBody := strings.Replace(ndjson(t, 0, 1, deleteLine), "6f1c1f1e-2a3b-4c5d-8e9f-0a1b2c3d4e5f", f.uuid(0x744), 1)
+	if status, _ := f.post(t, actors[0], deletedBody); status != http.StatusOK {
+		t.Fatalf("source delete status=%d", status)
+	}
+	if status, result := f.post(t, actors[0], f.body(f.uuid(0x745), sample, 62.5)); status != http.StatusOK || string(result["accepted"]) != "0" {
+		t.Fatal("deleted source sample was revived")
+	}
+	if err := f.admin.QueryRow(f.ctx, "SELECT array_agg(value ORDER BY value) FROM quantity_samples WHERE user_id=$1", actor.user).Scan(&values); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(values, []float64{72.5}) {
+		t.Fatal("one source deleted another source's record")
 	}
 }
 

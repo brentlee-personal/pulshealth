@@ -56,6 +56,7 @@ func familyTestSetup(t *testing.T) *familyTestFixture {
 		users := []string{f.actors[0].user, f.actors[1].user}
 		for _, table := range []string{
 			"family_record_identity",
+			"family_workout_references", "family_source_tombstones",
 			"workout_route_points", "workout_series_points", "quantity_samples", "category_samples",
 			"heartbeat_series", "ecg_samples", "state_of_mind", "medication_dose_events",
 			"aggregate_samples", "activity_summaries", "workouts", "batches", "device_tokens", "users",
@@ -109,6 +110,26 @@ func (f *familyTestFixture) post(t *testing.T, actor familyTestActor, body strin
 	return response.StatusCode, data
 }
 
+func (f *familyTestFixture) get(t *testing.T, actor familyTestActor, path string, data any) int {
+	t.Helper()
+	req, err := http.NewRequestWithContext(f.ctx, http.MethodGet, f.server.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+actor.token)
+	response, err := f.server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusOK && data != nil {
+		if err := json.NewDecoder(response.Body).Decode(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return response.StatusCode
+}
+
 func TestIntegration_FamilyHealthSameSampleIDIsMemberScoped(t *testing.T) {
 	f := familyTestSetup(t)
 	sample := f.uuid(0x610)
@@ -119,7 +140,7 @@ func TestIntegration_FamilyHealthSameSampleIDIsMemberScoped(t *testing.T) {
 		}
 	}
 	var members int
-	if err := f.admin.QueryRow(f.ctx, `SELECT count(DISTINCT user_id) FROM quantity_samples WHERE uuid=$1`, sample).Scan(&members); err != nil {
+	if err := f.admin.QueryRow(f.ctx, `SELECT count(DISTINCT q.user_id) FROM quantity_samples q JOIN family_record_identity r ON r.user_id=q.user_id AND r.physical_uuid=q.uuid WHERE r.source_record_id=$1`, sample).Scan(&members); err != nil {
 		t.Fatal(err)
 	}
 	if members != 2 {
@@ -155,7 +176,7 @@ func TestIntegration_FamilyHealthBatchDigestConflictRefused(t *testing.T) {
 		t.Errorf("different body under committed batch key status=%d, want 409", status)
 	}
 	var value float64
-	if err := f.admin.QueryRow(f.ctx, `SELECT value FROM quantity_samples WHERE uuid=$1 AND user_id=$2`, sample, f.actors[0].user).Scan(&value); err != nil {
+	if err := f.admin.QueryRow(f.ctx, `SELECT q.value FROM quantity_samples q JOIN family_record_identity r ON r.user_id=q.user_id AND r.physical_uuid=q.uuid WHERE r.source_record_id=$1 AND q.user_id=$2`, sample, f.actors[0].user).Scan(&value); err != nil {
 		t.Fatal(err)
 	}
 	if value != 62.5 {

@@ -45,7 +45,7 @@ func TestIntegration_FamilyHealthRePairPreservesSource(t *testing.T) {
 		t.Fatalf("re-paired upload status=%d", status)
 	}
 	var count int
-	if err := f.admin.QueryRow(f.ctx, "SELECT count(*) FROM quantity_samples WHERE user_id=$1 AND uuid=$2", actor.user, sample).Scan(&count); err != nil {
+	if err := f.admin.QueryRow(f.ctx, `SELECT count(*) FROM quantity_samples q JOIN family_record_identity r ON r.user_id=q.user_id AND r.physical_uuid=q.uuid WHERE q.user_id=$1 AND r.source_record_id=$2`, actor.user, sample).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {

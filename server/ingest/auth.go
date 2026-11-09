@@ -45,6 +45,8 @@ const tokenResolveTimeout = 2 * time.Second
 // principal is who a request authenticated as. Handlers read the resolved
 // user through readUserID; the token id is recorded on the batch.
 type principal struct {
+	sourceConnectionID string
+	sourceActive       bool
 	// userID is the user every row of this request belongs to: the token's
 	// user for a device token, else the X-User-ID header or the default.
 	userID string
@@ -132,6 +134,10 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			}
 			return
 		}
+		if !p.shared && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/routes") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "device credential is limited to synchronization"})
+			return
+		}
 		next(w, r)
 	}
 }
@@ -163,7 +169,7 @@ func (s *Server) authenticate(ctx context.Context, header string) (principal, *a
 		s.log.Warn("revoked device token presented", "token_id", d.ID, "token_prefix", d.TokenPrefix)
 		return principal{}, rejectUnauthorized
 	}
-	return principal{userID: d.UserID, tokenID: d.ID, tokenPrefix: d.TokenPrefix}, nil
+	return principal{userID: d.UserID, tokenID: d.ID, tokenPrefix: d.TokenPrefix, sourceConnectionID: d.SourceConnectionID, sourceActive: d.SourceActive}, nil
 }
 
 // resolveUser settles which user the request acts as. The shared token keeps
@@ -201,6 +207,27 @@ func readUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no authenticated user"})
 	return "", false
+}
+
+type recordScope struct {
+	userID             string
+	sourceConnectionID string
+}
+
+func readRecordScope(w http.ResponseWriter, r *http.Request) (recordScope, bool) {
+	userID, ok := readUserID(w, r)
+	if !ok {
+		return recordScope{}, false
+	}
+	p, _ := principalFrom(r.Context())
+	if p.shared {
+		return recordScope{userID: userID}, true
+	}
+	if p.sourceConnectionID == "" || !p.sourceActive {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "source connection requires verified pairing"})
+		return recordScope{}, false
+	}
+	return recordScope{userID: userID, sourceConnectionID: p.sourceConnectionID}, true
 }
 
 // logAuthMode is the startup line that says which credentials this server

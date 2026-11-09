@@ -737,17 +737,17 @@ func (f *fakeStore) RecordRejection(_ context.Context, rejection IngestRejection
 	f.rejections = append(f.rejections, rejection)
 	return f.rejectionErr
 }
-func (f *fakeStore) Stats(_ context.Context, userID string) ([]TypeStats, error) {
-	f.gotUserID = userID
+func (f *fakeStore) Stats(_ context.Context, scope recordScope) ([]TypeStats, error) {
+	f.gotUserID = scope.userID
 	return []TypeStats{}, nil
 }
-func (f *fakeStore) Digest(_ context.Context, userID, typ string, from, to time.Time) ([]DigestWindow, error) {
-	f.gotUserID, f.gotType, f.gotFrom, f.gotTo = userID, typ, from, to
+func (f *fakeStore) Digest(_ context.Context, scope recordScope, typ string, from, to time.Time) ([]DigestWindow, error) {
+	f.gotUserID, f.gotType, f.gotFrom, f.gotTo = scope.userID, typ, from, to
 	f.rangeCalls++
 	return []DigestWindow{}, nil
 }
-func (f *fakeStore) UUIDs(_ context.Context, userID, typ string, from, to time.Time) ([]string, error) {
-	f.gotUserID, f.gotType, f.gotFrom, f.gotTo = userID, typ, from, to
+func (f *fakeStore) UUIDs(_ context.Context, scope recordScope, typ string, from, to time.Time) ([]string, error) {
+	f.gotUserID, f.gotType, f.gotFrom, f.gotTo = scope.userID, typ, from, to
 	f.rangeCalls++
 	return f.uuidsRes, nil
 }

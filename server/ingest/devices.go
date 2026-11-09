@@ -37,14 +37,16 @@ var errTokenNotFound = errors.New("device token not found")
 
 // deviceToken is one row of device_tokens, minus the hash.
 type deviceToken struct {
-	ID          int64
-	UserID      string
-	Name        string
-	Status      string // "active" | "revoked"
-	TokenPrefix string
-	CreatedAt   time.Time
-	RevokedAt   *time.Time
-	LastSeenAt  *time.Time
+	SourceConnectionID string
+	SourceActive       bool
+	ID                 int64
+	UserID             string
+	Name               string
+	Status             string // "active" | "revoked"
+	TokenPrefix        string
+	CreatedAt          time.Time
+	RevokedAt          *time.Time
+	LastSeenAt         *time.Time
 }
 
 func (d deviceToken) active() bool { return d.Status == "active" }
@@ -90,15 +92,16 @@ func (st *Store) ResolveDeviceToken(ctx context.Context, hash []byte) (deviceTok
 	var d deviceToken
 	err := st.pool.QueryRow(ctx, `
 		WITH t AS (
-			SELECT id, user_id, status, token_prefix, last_seen_at
+			SELECT id, user_id, status, token_prefix, last_seen_at, source_connection_id
 			FROM device_tokens WHERE token_hash = $1
 		), touch AS (
 			UPDATE device_tokens d SET last_seen_at = now() FROM t
 			WHERE d.id = t.id AND t.status = 'active'
 			  AND (t.last_seen_at IS NULL OR t.last_seen_at < now() - interval '60 seconds')
 		)
-		SELECT id, user_id, status, token_prefix FROM t`, hash).
-		Scan(&d.ID, &d.UserID, &d.Status, &d.TokenPrefix)
+		SELECT t.id, t.user_id, t.status, t.token_prefix, coalesce(t.source_connection_id::text,''), coalesce(s.status='active',false)
+		FROM t LEFT JOIN family_source_connections s ON s.user_id=t.user_id AND s.id=t.source_connection_id`, hash).
+		Scan(&d.ID, &d.UserID, &d.Status, &d.TokenPrefix, &d.SourceConnectionID, &d.SourceActive)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return deviceToken{}, errTokenNotFound
 	}

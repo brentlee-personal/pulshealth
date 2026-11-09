@@ -269,9 +269,9 @@ func connectWithRetry(ctx context.Context, url string, logger *slog.Logger) (*pg
 type ingester interface {
 	InsertBatch(ctx context.Context, b *Batch, bodyBytes int64) (IngestResult, error)
 	RecordRejection(ctx context.Context, rejection IngestRejection) error
-	Stats(ctx context.Context, userID string) ([]TypeStats, error)
-	Digest(ctx context.Context, userID, identifier string, from, to time.Time) ([]DigestWindow, error)
-	UUIDs(ctx context.Context, userID, identifier string, from, to time.Time) ([]string, error)
+	Stats(ctx context.Context, scope recordScope) ([]TypeStats, error)
+	Digest(ctx context.Context, scope recordScope, identifier string, from, to time.Time) ([]DigestWindow, error)
+	UUIDs(ctx context.Context, scope recordScope, identifier string, from, to time.Time) ([]string, error)
 	Routes(ctx context.Context, userID string, filters RouteFilters) ([]RouteSummary, error)
 	Route(ctx context.Context, userID, uuid string) (*RouteDetail, error)
 	RouteMetrics(ctx context.Context, userID, uuid string) ([]RouteMetricSeries, error)
@@ -466,6 +466,11 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.InsertBatch(insertCtx, batch, cr.n)
 	insertDur := time.Since(insertStart)
 	if err != nil {
+		if errors.Is(err, errSourceSnapshot) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "mutable source snapshot requires a verified observation"})
+			s.recordBatchRejection(r, http.StatusConflict, "conflict", cr.n)
+			return
+		}
 		if errors.Is(err, errRecordConflict) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "record identity conflicts with source history"})
 			s.recordBatchRejection(r, http.StatusConflict, "conflict", cr.n)
@@ -643,11 +648,11 @@ func batchParseStatus(err error) int {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	userID, ok := readUserID(w, r)
+	scope, ok := readRecordScope(w, r)
 	if !ok {
 		return
 	}
-	stats, err := s.store.Stats(r.Context(), userID)
+	stats, err := s.store.Stats(r.Context(), scope)
 	if err != nil {
 		s.log.Error("stats query failed", "err", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats failed"})
@@ -690,7 +695,7 @@ func msParam(s, name string) (time.Time, error) {
 }
 
 func (s *Server) handleDigest(w http.ResponseWriter, r *http.Request) {
-	userID, ok := readUserID(w, r)
+	scope, ok := readRecordScope(w, r)
 	if !ok {
 		return
 	}
@@ -699,7 +704,7 @@ func (s *Server) handleDigest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	windows, err := s.store.Digest(r.Context(), userID, typ, from, to)
+	windows, err := s.store.Digest(r.Context(), scope, typ, from, to)
 	if err != nil {
 		s.log.Error("digest query failed", "type", typ, "err", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "digest failed"})
@@ -709,7 +714,7 @@ func (s *Server) handleDigest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUUIDs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := readUserID(w, r)
+	scope, ok := readRecordScope(w, r)
 	if !ok {
 		return
 	}
@@ -722,7 +727,7 @@ func (s *Server) handleUUIDs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "range exceeds 35 days"})
 		return
 	}
-	uuids, err := s.store.UUIDs(r.Context(), userID, typ, from, to)
+	uuids, err := s.store.UUIDs(r.Context(), scope, typ, from, to)
 	if err != nil {
 		s.log.Error("uuids query failed", "type", typ, "err", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "uuids failed"})

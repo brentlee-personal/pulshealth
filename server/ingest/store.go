@@ -307,9 +307,11 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 
 	insertStart := time.Now()
 	if sourceConnectionID != nil {
-		if err := claimFamilySamples(ctx, tx, b, userID, *sourceConnectionID, credentialID); err != nil {
+		prepared, err := prepareFamilyRecords(ctx, tx, b, userID, *sourceConnectionID, credentialID)
+		if err != nil {
 			return res, err
 		}
+		b = prepared
 	}
 
 	typeIDs, err := ensureTypes(ctx, tx, b)
@@ -380,7 +382,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	} else {
 		res.Accepted += n
 	}
-	res.Duplicates = int64(len(b.Samples)) - res.Accepted
+	res.Duplicates = int64(len(b.Samples)+b.suppressedSamples) - res.Accepted
 
 	if n, err := insertRoutePoints(ctx, tx, b.Routes, temporalContextIDs, userID); err != nil {
 		return res, fmt.Errorf("insert route points: %w", err)
@@ -417,7 +419,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	if n, err := applyDeletions(ctx, tx, b.Deletions, userID); err != nil {
 		return res, fmt.Errorf("apply deletions: %w", err)
 	} else {
-		res.Deleted = n
+		res.Deleted = n + b.sourceDeleted
 	}
 
 	// Server-measured insert time covers the health-data mutations above. The
@@ -2303,40 +2305,54 @@ type TypeStats struct {
 
 // Stats aggregates per-type row counts and batch bookkeeping so the app can
 // reconcile server-side state with on-device anchors.
-func (st *Store) Stats(ctx context.Context, userID string) ([]TypeStats, error) {
+func (st *Store) Stats(ctx context.Context, scope recordScope) ([]TypeStats, error) {
+	var sourceID any
+	if scope.sourceConnectionID != "" {
+		sourceID = scope.sourceConnectionID
+	}
 	rows, err := st.pool.Query(ctx, `
-		WITH per_table AS (
+		WITH scoped_records AS (
+			SELECT physical_uuid,physical_table FROM family_record_identity WHERE user_id=$1 AND source_connection_id=$2
+		), per_table AS (
 			SELECT t.identifier, count(*) AS rows, min(q.start_ts) AS earliest, max(q.start_ts) AS latest
 			FROM quantity_samples q JOIN sample_types t USING (type_id)
-			WHERE q.user_id = $1 GROUP BY 1
+			WHERE q.user_id = $1 AND ($2::uuid IS NULL OR q.uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='quantity_samples')) GROUP BY 1
 			UNION ALL
 			SELECT t.identifier, count(*), min(c.start_ts), max(c.start_ts)
 			FROM category_samples c JOIN sample_types t USING (type_id)
-			WHERE c.user_id = $1 GROUP BY 1
+			WHERE c.user_id = $1 AND ($2::uuid IS NULL OR c.uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='category_samples')) GROUP BY 1
 			UNION ALL
 			SELECT 'HKWorkoutTypeIdentifier', count(*), min(start_ts), max(start_ts)
-			FROM workouts WHERE user_id = $1 HAVING count(*) > 0
+			FROM workouts WHERE user_id = $1 AND ($2::uuid IS NULL OR uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='workouts')) HAVING count(*) > 0
 			UNION ALL
 			SELECT 'HKDataTypeIdentifierHeartbeatSeries', count(*), min(start_ts), max(start_ts)
-			FROM heartbeat_series WHERE user_id = $1 HAVING count(*) > 0
+			FROM heartbeat_series WHERE user_id = $1 AND ($2::uuid IS NULL OR uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='heartbeat_series')) HAVING count(*) > 0
 			UNION ALL
 			SELECT 'HKDataTypeIdentifierElectrocardiogram', count(*), min(start_ts), max(start_ts)
-			FROM ecg_samples WHERE user_id = $1 HAVING count(*) > 0
+			FROM ecg_samples WHERE user_id = $1 AND ($2::uuid IS NULL OR uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='ecg_samples')) HAVING count(*) > 0
 			UNION ALL
 			SELECT 'HKDataTypeIdentifierStateOfMind', count(*), min(start_ts), max(start_ts)
-			FROM state_of_mind WHERE user_id = $1 HAVING count(*) > 0
+			FROM state_of_mind WHERE user_id = $1 AND ($2::uuid IS NULL OR uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='state_of_mind')) HAVING count(*) > 0
 			UNION ALL
 			SELECT 'HKMedicationDoseEventTypeIdentifierMedicationDoseEvent', count(*), min(start_ts), max(start_ts)
-			FROM medication_dose_events WHERE user_id = $1 HAVING count(*) > 0
+			FROM medication_dose_events WHERE user_id = $1 AND ($2::uuid IS NULL OR uuid IN
+				(SELECT physical_uuid FROM scoped_records WHERE physical_table='medication_dose_events')) HAVING count(*) > 0
 			UNION ALL
 			SELECT 'HKActivitySummaryTypeIdentifier', count(*), min(date)::timestamptz, max(date)::timestamptz
-			FROM activity_summaries WHERE user_id = $1 HAVING count(*) > 0
+			FROM activity_summaries WHERE user_id = $1 AND $2::uuid IS NULL HAVING count(*) > 0
 		), samples AS (
 			SELECT identifier, sum(rows)::bigint AS rows, min(earliest) AS earliest, max(latest) AS latest
 			FROM per_table GROUP BY 1
 		), batch_agg AS (
 			SELECT type_identifier, max(received_at) AS last_batch_at, count(*)::bigint AS batches
-			FROM batches WHERE user_id = $1 GROUP BY 1
+			FROM batches WHERE user_id = $1 AND ($2::uuid IS NULL OR device_token_id IN
+				(SELECT id FROM device_tokens WHERE user_id=$1 AND source_connection_id=$2)) GROUP BY 1
 		)
 		SELECT coalesce(s.identifier, b.type_identifier) AS type,
 		       coalesce(s.rows, 0),
@@ -2346,7 +2362,7 @@ func (st *Store) Stats(ctx context.Context, userID string) ([]TypeStats, error) 
 		       coalesce(b.batches, 0)
 		FROM samples s
 		FULL OUTER JOIN batch_agg b ON b.type_identifier = s.identifier
-		ORDER BY 1`, userID)
+		ORDER BY 1`, scope.userID, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2414,14 +2430,24 @@ func (st *Store) resolveType(ctx context.Context, identifier string) (table stri
 
 // typeRangeQuery builds the shared "rows of this type in [from, to)" query
 // used by Digest and UUIDs.
-func typeRangeQuery(columns, table, userID string, typeID *int16, from, to time.Time) (string, []any) {
-	query := fmt.Sprintf(`SELECT %s FROM %s WHERE user_id = $1 AND start_ts >= $2 AND start_ts < $3`, columns, table)
-	args := []any{userID, from, to}
+func typeRangeQuery(columns, table string, scope recordScope, typeID *int16, from, to time.Time) (string, []any) {
+	columns = strings.ReplaceAll(strings.ReplaceAll(columns, "uuid", "h.uuid"), "start_ts", "h.start_ts")
+	join := ""
+	if scope.sourceConnectionID != "" {
+		columns = strings.ReplaceAll(columns, "h.uuid", "r.source_record_id")
+		join = " JOIN family_record_identity r ON r.user_id=h.user_id AND r.physical_uuid=h.uuid AND r.physical_start=h.start_ts AND r.physical_table='" + table + "'"
+	}
+	query := fmt.Sprintf(`SELECT %s FROM %s h%s WHERE h.user_id = $1 AND h.start_ts >= $2 AND h.start_ts < $3`, columns, table, join)
+	args := []any{scope.userID, from, to}
 	if typeID != nil {
-		query += ` AND type_id = $4`
+		query += ` AND h.type_id = $4`
 		args = append(args, *typeID)
 	}
-	return query + ` ORDER BY start_ts`, args
+	if scope.sourceConnectionID != "" {
+		args = append(args, scope.sourceConnectionID)
+		query += fmt.Sprintf(" AND r.source_connection_id=$%d", len(args))
+	}
+	return query + ` ORDER BY h.start_ts`, args
 }
 
 // uuidRawBytes decodes a canonical hyphenated UUID into its raw 16 bytes.
@@ -2454,7 +2480,7 @@ type DigestWindow struct {
 // Digest computes per-UTC-month reconciliation digests over [from, to) by
 // start_ts. Rows arrive ordered by start_ts and are folded month by month so
 // large windows never materialize in memory. Unknown types yield [].
-func (st *Store) Digest(ctx context.Context, userID, identifier string, from, to time.Time) ([]DigestWindow, error) {
+func (st *Store) Digest(ctx context.Context, scope recordScope, identifier string, from, to time.Time) ([]DigestWindow, error) {
 	out := []DigestWindow{}
 	table, typeID, ok, err := st.resolveType(ctx, identifier)
 	if err != nil {
@@ -2464,7 +2490,7 @@ func (st *Store) Digest(ctx context.Context, userID, identifier string, from, to
 		return out, nil
 	}
 
-	query, args := typeRangeQuery("uuid, start_ts", table, userID, typeID, from, to)
+	query, args := typeRangeQuery("uuid, start_ts", table, scope, typeID, from, to)
 	rows, err := st.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -2512,7 +2538,7 @@ func (st *Store) Digest(ctx context.Context, userID, identifier string, from, to
 
 // UUIDs returns the uuids of all samples of the given type with start_ts in
 // [from, to). The handler bounds the range, so the result stays small.
-func (st *Store) UUIDs(ctx context.Context, userID, identifier string, from, to time.Time) ([]string, error) {
+func (st *Store) UUIDs(ctx context.Context, scope recordScope, identifier string, from, to time.Time) ([]string, error) {
 	out := []string{}
 	table, typeID, ok, err := st.resolveType(ctx, identifier)
 	if err != nil {
@@ -2522,7 +2548,7 @@ func (st *Store) UUIDs(ctx context.Context, userID, identifier string, from, to 
 		return out, nil
 	}
 
-	query, args := typeRangeQuery("uuid", table, userID, typeID, from, to)
+	query, args := typeRangeQuery("uuid", table, scope, typeID, from, to)
 	rows, err := st.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
