@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pulshealth.com/protocol/v1/schema/family-batch-receipt.schema.json",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/family-batch-receipt.schema.json",
   "type": "object",
   "properties": {
     "member_id": {
