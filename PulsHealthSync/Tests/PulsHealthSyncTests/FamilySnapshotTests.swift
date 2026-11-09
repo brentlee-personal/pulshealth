@@ -117,7 +117,7 @@ import Testing
 
     @Test func profileReadHappensAfterObservationAndDoesNotUseCachedValues() async throws {
         let engine = ConcurrentUploadTests().makeEngine()
-        let destination = Destination(store: engine.store)
+        let destination = Destination(store: await engine.store)
         await engine.setTransport(destination)
         let before = Date()
         try await engine.syncProfile()
@@ -131,11 +131,9 @@ import Testing
     @Test func mergedWorkoutCapturesOneFreshProfileForTheWholePack() async throws {
         let fixture = ConcurrentUploadTests()
         let engine = fixture.makeEngine()
-        let destination = Destination(store: engine.store)
-        var first = fixture.page("workout", samples: 1)
-        first.enrichment.profile = ProfilePayload(name: "cached-before-query")
-        var second = fixture.page("other", samples: 1)
-        second.enrichment.profile = ProfilePayload(name: "another-old-cache")
+        let destination = Destination(store: await engine.store)
+        let first = fixture.page("workout", samples: 1, profile: ProfilePayload(name: "cached-before-query"))
+        let second = fixture.page("other", samples: 1, profile: ProfilePayload(name: "another-old-cache"))
         let config = await engine.store.configuration
         #expect(await engine.uploadPacks([[first, second]], reason: .backfill, transport: destination, config: config) == [true])
         let batch = try #require(await destination.batches.first)
@@ -156,8 +154,7 @@ import Testing
         }
         let fixture = ConcurrentUploadTests()
         let engine = fixture.makeEngine()
-        var page = fixture.page("workout", samples: 1)
-        page.enrichment.profile = ProfilePayload(name: "cached")
+        let page = fixture.page("workout", samples: 1, profile: ProfilePayload(name: "cached"))
         let config = await engine.store.configuration
         #expect(await engine.uploadPacks([[page, fixture.page("other", samples: 1)]], reason: .backfill,
             transport: transport, config: config) == [false])

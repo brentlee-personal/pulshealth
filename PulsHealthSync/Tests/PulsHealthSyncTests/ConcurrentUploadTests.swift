@@ -41,7 +41,7 @@ import Testing
             wakeLog: WakeLog(directory: dir))
     }
 
-    func page(_ identifier: String, samples: Int = 1_000) -> MergedPage {
+    func page(_ identifier: String, samples: Int = 1_000, profile: ProfilePayload? = nil) -> MergedPage {
         MergedPage(
             identifier: identifier,
             samples: (0..<samples).map { i in
@@ -54,7 +54,7 @@ import Testing
             deletions: [],
             newAnchor: HKQueryAnchor(fromValue: samples),
             newAnchorData: Data([1]),
-            enrichment: HealthSyncEngine.WorkoutEnrichment(),
+            enrichment: HealthSyncEngine.WorkoutEnrichment(profile: profile),
             queryDuration: 0,
             drained: false,
             rawCount: samples,
