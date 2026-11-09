@@ -51,7 +51,7 @@ func batchRequest(t *testing.T, ctx context.Context, token string) *http.Request
 	return req
 }
 
-// Every batch may decode to 128 MB, so only so many are handled at once.
+// Every batch may decode to 64 MiB, so only so many are handled at once.
 // Beyond that a request waits briefly for a slot, then gets a 503 the app
 // retries — after auth, and before its body is decoded.
 func TestBatchSlotsBoundConcurrentBatches(t *testing.T) {

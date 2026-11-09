@@ -56,10 +56,10 @@
   },
   "$defs": {
     "count": {
-      "description": "Number of lines of one type that follow the header. Absent means 0. The reference server rejects any single count above 100,000 and a combined total above 200,000.",
+      "description": "Number of lines of one type that follow the header. Absent means 0. The reference server rejects any single count or combined business-line total above 5,000 with HTTP 413.",
       "type": "integer",
       "minimum": 0,
-      "maximum": 100000
+      "maximum": 5000
     }
   }
 }

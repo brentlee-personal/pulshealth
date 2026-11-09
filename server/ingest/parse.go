@@ -319,15 +319,21 @@ const (
 	maxRoutePoints = 4000
 	// maxSeriesPoints caps points per workout-series line; clients split longer streams.
 	maxSeriesPoints = 4000
-	// Header counts are client-controlled and feed slice capacities. Bound them
-	// before allocating, with ample headroom over the app's normal 1,000-item
-	// batches. The combined cap also limits parser and transaction work.
-	maxDeclaredItems = 100_000
-	maxBatchLines    = 200_000
+	// Check client counts before they become slice capacities.
+	maxDeclaredItems = 5_000
+	maxBatchLines    = 5_000
 	// Per-line point caps keep individual JSON lines small; this per-batch cap
 	// prevents many valid-sized lines from creating an unbounded transaction.
 	maxBatchPoints = 100_000
 )
+
+type BatchLimitError struct{ msg string }
+
+func (e *BatchLimitError) Error() string { return e.msg }
+
+func batchLimitErrf(format string, args ...any) error {
+	return &BatchLimitError{msg: fmt.Sprintf(format, args...)}
+}
 
 // ParseError marks client-side (HTTP 400) protocol violations.
 type ParseError struct {
@@ -528,7 +534,8 @@ func validLocalDate(s string) bool {
 func ParseBatch(r io.Reader) (*Batch, error) {
 	digest := sha256.New()
 	sc := bufio.NewScanner(io.TeeReader(r, digest))
-	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxLine)
+	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxLine+2)
+	sc.Split(batchLine)
 
 	if !sc.Scan() {
 		if err := sc.Err(); err != nil {
@@ -585,13 +592,13 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 	totalLines := b.Header.ProfileCount
 	for _, count := range counts {
 		if count.value > maxDeclaredItems {
-			return nil, parseErrf("invalid batch header: %s %d exceeds limit %d",
+			return nil, batchLimitErrf("invalid batch header: %s %d exceeds limit %d",
 				count.name, count.value, maxDeclaredItems)
 		}
 		totalLines += count.value
 	}
 	if totalLines > maxBatchLines {
-		return nil, parseErrf("invalid batch header: %d declared lines exceeds limit %d",
+		return nil, batchLimitErrf("invalid batch header: %d declared lines exceeds limit %d",
 			totalLines, maxBatchLines)
 	}
 
@@ -646,7 +653,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 		}
 		routePoints += len(rl.Route.Points)
 		if routePoints > maxBatchPoints {
-			return nil, parseErrf("route %d: batch route points %d exceeds limit %d",
+			return nil, batchLimitErrf("route %d: batch route points %d exceeds limit %d",
 				i+1, routePoints, maxBatchPoints)
 		}
 		b.Routes = append(b.Routes, rl)
@@ -668,7 +675,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 		}
 		seriesPoints += len(sl.Series.Points)
 		if seriesPoints > maxBatchPoints {
-			return nil, parseErrf("series %d: batch series points %d exceeds limit %d",
+			return nil, batchLimitErrf("series %d: batch series points %d exceeds limit %d",
 				i+1, seriesPoints, maxBatchPoints)
 		}
 		b.Series = append(b.Series, sl)
@@ -738,6 +745,14 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 	}
 	b.bodyDigest = digest.Sum(nil)
 	return &b, nil
+}
+
+func batchLine(data []byte, atEOF bool) (int, []byte, error) {
+	advance, line, err := bufio.ScanLines(data, atEOF)
+	if len(line) > scannerMaxLine || (advance == 0 && len(data) > scannerMaxLine+1) {
+		return 0, nil, batchLimitErrf("line exceeds limit %d", scannerMaxLine)
+	}
+	return advance, line, err
 }
 
 func nextLine(sc *bufio.Scanner) ([]byte, error) {

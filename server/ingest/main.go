@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	maxWireBody    = 256 << 20 // compressed request body cap
-	maxDecodedBody = 128 << 20 // decompressed NDJSON cap
+	maxWireBody    = 8 << 20  // compressed request body cap
+	maxDecodedBody = 64 << 20 // decompressed NDJSON cap
 	// Inside Compose's stop_grace_period (30 s), with room left for the
 	// inserts still running at the end of it to be cancelled and the pool
 	// closed before SIGKILL; see run.
@@ -606,6 +606,10 @@ func (s *Server) recordBatchRejection(r *http.Request, status int, stage string,
 }
 
 func batchParseStatus(err error) int {
+	var limit *BatchLimitError
+	if errors.As(err, &limit) {
+		return http.StatusRequestEntityTooLarge
+	}
 	var mbe *http.MaxBytesError
 	if errors.As(err, &mbe) {
 		return http.StatusRequestEntityTooLarge

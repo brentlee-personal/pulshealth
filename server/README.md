@@ -714,8 +714,8 @@ as or read for, defaulting to the seeded default user.
   `X-Wake-ID` (a UUID; malformed is a 400) and `X-Wake-Trigger` headers are
   recorded on the `batches` row (see "Analysing background wakes"). Returns
   `{"accepted":N,"deleted":M,"duplicates":K,"routePoints":P,"seriesPoints":S,"aggregateSamples":A,"activitySummaries":U}`.
-  Limits: compressed body ≤ 256 MB, decompressed NDJSON ≤ 128 MB, each
-  declared count ≤ 100,000, all declared lines ≤ 200,000, route and series
+  Limits: compressed body ≤ 8 MiB, decompressed NDJSON ≤ 64 MiB, each
+  declared count ≤ 5,000, all declared business lines ≤ 5,000, route and series
   points ≤ 100,000 each per batch, one NDJSON line ≤ 4 MB (real lines peak
   around 400 KB).
 - `GET /v1/stats` — per-type row counts and bounds, plus batch bookkeeping.

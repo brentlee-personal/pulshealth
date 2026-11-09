@@ -136,11 +136,11 @@ but SHOULD answer over-limit input with **413**, which the app does not retry.
 
 | Limit | Value |
 |---|---|
-| Compressed request body | 256 MiB |
-| Decompressed NDJSON | 128 MiB (enforced while inflating, so a larger body is never held in memory) |
+| Compressed request body | 8 MiB |
+| Decompressed NDJSON | 64 MiB (enforced while inflating, so a larger body is never held in memory) |
 | One NDJSON line | 4 MiB (real maxima: ECG voltage arrays and 4,000-point route lines, about 400 KB) |
-| Any single header count (`sampleCount`, …) | 100,000 |
-| All header counts combined | 200,000 |
+| Any single header count (`sampleCount`, …) | 5,000 |
+| All header counts combined | 5,000 business lines, excluding the header |
 | Points per route or series line | 4,000 (the sender chunks longer streams) |
 | Route points per batch, series points per batch | 100,000 each |
 | Time to accept one batch | the sender gives up after 60 s ([8.1](#81-retry-contract)); the reference server bounds its own database work at 5 minutes and finishes the commit even if the client disconnects |
