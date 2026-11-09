@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/aggregate.schema.json",
+  "title": "Puls Sync Protocol v1: aggregate line",
+  "description": "One on-device statistics bucket. Buckets have no UUID: identity is (user, type, func, intervalValue, intervalUnit, deviceFilter, bucketStart) and receivers upsert. value is sent explicitly, and null means the bucket is empty and any stored value must be cleared. bucketEnd must be after bucketStart (not expressible here).",
+  "type": "object",
+  "required": ["aggregate"],
+  "properties": {
+    "aggregate": {
+      "type": "object",
+      "required": ["type", "func", "intervalValue", "intervalUnit", "deviceFilter", "bucketStart", "bucketEnd", "value"],
+      "properties": {
+        "type": { "$ref": "common.schema.json#/$defs/typeIdentifier" },
+        "func": { "enum": ["sum", "average", "min", "max", "mostRecent", "duration"] },
+        "intervalValue": { "type": "integer", "minimum": 1 },
+        "intervalUnit": { "enum": ["minute", "hour", "day", "week", "month"] },
+        "deviceFilter": { "enum": ["all", "watch", "iphone"] },
+        "bucketStart": { "$ref": "common.schema.json#/$defs/requiredEpochMs" },
+        "bucketEnd": { "$ref": "common.schema.json#/$defs/epochMs" },
+        "bucketStartContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "bucketEndContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "value": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "unit": { "description": "The type's canonical unit, or s for func=duration.", "$ref": "common.schema.json#/$defs/nullableString" }
+      }
+    }
+  }
+}

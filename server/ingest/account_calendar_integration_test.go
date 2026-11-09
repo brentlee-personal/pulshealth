@@ -43,7 +43,7 @@ func TestIntegration_AccountCalendarAndDeletedOwner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parsed, err := ParseBatch(strings.NewReader(string(wire) + "\n"))
+		parsed, err := ParseFamilyBatch(strings.NewReader(string(wire) + "\n"))
 		if err != nil {
 			t.Fatal(err)
 		}

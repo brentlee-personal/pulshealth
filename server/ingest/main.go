@@ -113,6 +113,9 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	if _, err := familyProtocol(); err != nil {
+		return fmt.Errorf("load family protocol: %w", err)
+	}
 	// The shared token is optional since per-device tokens exist (SRV-8):
 	// empty, or PULS_ALLOW_SHARED_TOKEN=false, means only device tokens
 	// authenticate. See auth.go for the order the two are checked in.
@@ -393,7 +396,11 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	decodedBody := http.MaxBytesReader(w, io.NopCloser(body), maxDecodedBody)
 	defer decodedBody.Close()
 
-	batch, err := ParseBatch(decodedBody)
+	parse := ParseBatch
+	if p, ok := principalFrom(r.Context()); ok && p.tokenID > 0 {
+		parse = ParseFamilyBatch
+	}
+	batch, err := parse(decodedBody)
 	parseDur := time.Since(start)
 	if err != nil {
 		var pve *ProtocolVersionError

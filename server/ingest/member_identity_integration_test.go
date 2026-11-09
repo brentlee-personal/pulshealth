@@ -54,7 +54,11 @@ func familyTestSetup(t *testing.T) *familyTestFixture {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
 		users := []string{f.actors[0].user, f.actors[1].user}
-		for _, table := range []string{"quantity_samples", "batches", "device_tokens", "users"} {
+		for _, table := range []string{
+			"workout_route_points", "workout_series_points", "quantity_samples", "category_samples",
+			"heartbeat_series", "ecg_samples", "state_of_mind", "medication_dose_events",
+			"aggregate_samples", "activity_summaries", "workouts", "batches", "device_tokens", "users",
+		} {
 			column := "user_id"
 			if table == "users" {
 				column = "id"

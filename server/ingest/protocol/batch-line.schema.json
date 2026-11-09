@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/batch-line.schema.json",
+  "title": "Puls Sync Protocol v1: any line after the header",
+  "description": "Exactly one of the seven line shapes. Wrapped lines are discriminated by their single top-level key; a sample line is one that carries none of those keys. Validate the first line of a batch against header.schema.json instead.",
+  "oneOf": [
+    { "$ref": "deletion.schema.json" },
+    { "$ref": "route.schema.json" },
+    { "$ref": "series.schema.json" },
+    { "$ref": "aggregate.schema.json" },
+    { "$ref": "activity-summary.schema.json" },
+    { "$ref": "profile.schema.json" },
+    {
+      "allOf": [
+        { "$ref": "sample.schema.json" },
+        {
+          "not": {
+            "anyOf": [
+              { "required": ["deleted"] },
+              { "required": ["route"] },
+              { "required": ["series"] },
+              { "required": ["aggregate"] },
+              { "required": ["activitySummary"] },
+              { "required": ["profile"] }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

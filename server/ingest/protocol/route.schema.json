@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/route.schema.json",
+  "title": "Puls Sync Protocol v1: workout route line",
+  "description": "GPS fixes for one workout. A long route is split across several lines of at most 4,000 points, possibly across batches; identity of a point is (workoutUUID, t). Optional fields are absent or null when Core Location reported them invalid.",
+  "type": "object",
+  "required": ["route"],
+  "properties": {
+    "route": {
+      "type": "object",
+      "required": ["workoutUUID", "points"],
+      "properties": {
+        "workoutUUID": { "$ref": "common.schema.json#/$defs/uuid" },
+        "points": { "type": "array", "maxItems": 4000, "items": { "$ref": "#/$defs/point" } }
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["t", "lat", "lon"],
+      "properties": {
+        "t": { "$ref": "common.schema.json#/$defs/requiredEpochMs" },
+        "temporalContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "lat": { "description": "Degrees.", "type": "number" },
+        "lon": { "description": "Degrees.", "type": "number" },
+        "alt": { "description": "Metres above sea level.", "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "hAcc": { "description": "Horizontal accuracy, metres.", "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "vAcc": { "description": "Vertical accuracy, metres.", "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "speed": { "description": "Metres per second.", "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "course": { "description": "Degrees clockwise from true north.", "$ref": "common.schema.json#/$defs/nullableNumber" }
+      }
+    }
+  }
+}

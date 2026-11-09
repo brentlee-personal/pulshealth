@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/activity-summary.schema.json",
+  "title": "Puls Sync Protocol v1: activity summary line",
+  "description": "One day of activity rings. Summaries have no UUID: identity is (user, localDate), falling back to the UTC calendar date of date when localDate is absent. The line is the whole row for that day: the app omits rings it has no value for, an omitted field means null, and receivers replace every stored column (never merge the keys present).",
+  "type": "object",
+  "required": ["activitySummary"],
+  "properties": {
+    "activitySummary": {
+      "type": "object",
+      "required": ["date"],
+      "properties": {
+        "date": { "description": "Start of the local calendar day as an instant.", "$ref": "common.schema.json#/$defs/requiredEpochMs" },
+        "localDate": { "description": "The calendar day in the sender's zone, YYYY-MM-DD. The upsert key when present.", "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "temporalContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "moveKcal": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "moveGoalKcal": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "exerciseMin": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "exerciseGoalMin": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "standHours": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "standGoalHours": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "moveMode": { "description": "0 = Move ring in kilocalories (activeEnergy); 1 = Move ring in minutes (appleMoveTime).", "anyOf": [{ "enum": [0, 1] }, { "type": "null" }] },
+        "moveTimeMin": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "moveTimeGoalMin": { "$ref": "common.schema.json#/$defs/nullableNumber" }
+      }
+    }
+  }
+}

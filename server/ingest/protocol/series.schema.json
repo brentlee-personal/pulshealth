@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/series.schema.json",
+  "title": "Puls Sync Protocol v1: workout series line",
+  "description": "An intra-workout time series for one quantity type (heart rate, power, cadence, speed, altitude and similar), in the type's canonical unit. A long stream is split across several lines of at most 4,000 points; identity of a point is (workoutUUID, type, t).",
+  "type": "object",
+  "required": ["series"],
+  "properties": {
+    "series": {
+      "type": "object",
+      "required": ["workoutUUID", "type", "points"],
+      "properties": {
+        "workoutUUID": { "$ref": "common.schema.json#/$defs/uuid" },
+        "type": { "$ref": "common.schema.json#/$defs/typeIdentifier" },
+        "unit": { "$ref": "common.schema.json#/$defs/nullableString" },
+        "points": { "type": "array", "maxItems": 4000, "items": { "$ref": "#/$defs/point" } }
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["t", "value"],
+      "properties": {
+        "t": { "$ref": "common.schema.json#/$defs/requiredEpochMs" },
+        "temporalContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "value": { "type": "number" }
+      }
+    }
+  }
+}

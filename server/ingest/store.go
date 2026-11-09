@@ -165,6 +165,9 @@ var errSourceBinding = errors.New("source connection requires verified pairing")
 // idempotent transaction, so it is simply run again after a short jittered
 // pause. Bounded by the handler's insert deadline via ctx.
 func (st *Store) InsertBatch(ctx context.Context, b *Batch, bodyBytes int64) (IngestResult, error) {
+	if b.Header.DeviceTokenID != 0 && !b.familyValidated {
+		return IngestResult{}, parseErrf("personal batch requires family protocol validation")
+	}
 	for attempt := 0; ; attempt++ {
 		res, err := st.insertBatchOnce(ctx, b, bodyBytes)
 		res.Retries = attempt

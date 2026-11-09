@@ -1,0 +1,1269 @@
+{
+  "protocol": 1,
+  "source": "PulsHealthSync/Sources/PulsHealthSync/Models/HealthTypeCatalog.swift",
+  "groups": [
+    {
+      "key": "activity",
+      "label": "Activity"
+    },
+    {
+      "key": "heart",
+      "label": "Heart"
+    },
+    {
+      "key": "body",
+      "label": "Body"
+    },
+    {
+      "key": "respiratory",
+      "label": "Respiratory"
+    },
+    {
+      "key": "sleep",
+      "label": "Sleep"
+    },
+    {
+      "key": "nutrition",
+      "label": "Nutrition"
+    },
+    {
+      "key": "vitals",
+      "label": "Vitals"
+    },
+    {
+      "key": "workouts",
+      "label": "Workouts"
+    },
+    {
+      "key": "other",
+      "label": "Other"
+    }
+  ],
+  "types": [
+    {
+      "identifier": "HKActivitySummaryTypeIdentifier",
+      "kind": "activitySummary",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Activity Rings",
+      "group": "activity",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierAppleStandHour",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Stand Hours",
+      "group": "activity",
+      "estimatedSamplesPerDay": 16
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierAudioExposureEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Loud Environment Events",
+      "group": "other",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierHandwashingEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Handwashing Events",
+      "group": "other",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierHeadphoneAudioExposureEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Loud Headphone Events",
+      "group": "other",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierHighHeartRateEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "High HR Events",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierIrregularHeartRhythmEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Irregular Rhythm Events",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierLowCardioFitnessEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Low Cardio Fitness Events",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierLowHeartRateEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Low HR Events",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierMindfulSession",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Mindful Minutes",
+      "group": "other",
+      "estimatedSamplesPerDay": 2
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierSleepAnalysis",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Sleep Stages",
+      "group": "sleep",
+      "estimatedSamplesPerDay": 40
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierSleepApneaEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "18.0",
+      "displayName": "Sleep Apnea Events",
+      "group": "sleep",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKCategoryTypeIdentifierToothbrushingEvent",
+      "kind": "category",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Toothbrushing Events",
+      "group": "other",
+      "estimatedSamplesPerDay": 2
+    },
+    {
+      "identifier": "HKDataTypeIdentifierElectrocardiogram",
+      "kind": "ecg",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "ECG",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKDataTypeIdentifierHeartbeatSeries",
+      "kind": "heartbeatSeries",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Heartbeat Series (beat-to-beat)",
+      "group": "heart",
+      "estimatedSamplesPerDay": 6
+    },
+    {
+      "identifier": "HKDataTypeIdentifierStateOfMind",
+      "kind": "stateOfMind",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "18.0",
+      "displayName": "State of Mind",
+      "group": "other",
+      "estimatedSamplesPerDay": 2
+    },
+    {
+      "identifier": "HKMedicationDoseEventTypeIdentifierMedicationDoseEvent",
+      "kind": "medicationDose",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "26.0",
+      "displayName": "Medication Doses",
+      "group": "other",
+      "estimatedSamplesPerDay": 3
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierActiveEnergyBurned",
+      "kind": "quantity",
+      "unit": "kcal",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Active Energy",
+      "group": "activity",
+      "estimatedSamplesPerDay": 700
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierAppleExerciseTime",
+      "kind": "quantity",
+      "unit": "min",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Exercise Minutes",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierAppleMoveTime",
+      "kind": "quantity",
+      "unit": "min",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Move Minutes",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierAppleSleepingWristTemperature",
+      "kind": "quantity",
+      "unit": "degC",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Wrist Temperature (Sleep)",
+      "group": "sleep",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierAppleStandTime",
+      "kind": "quantity",
+      "unit": "min",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Stand Minutes",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierAtrialFibrillationBurden",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "AFib Burden",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBasalBodyTemperature",
+      "kind": "quantity",
+      "unit": "degC",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Basal Body Temperature",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBasalEnergyBurned",
+      "kind": "quantity",
+      "unit": "kcal",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Resting Energy",
+      "group": "activity",
+      "estimatedSamplesPerDay": 350
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBloodAlcoholContent",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Blood Alcohol Content",
+      "group": "vitals",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBloodGlucose",
+      "kind": "quantity",
+      "unit": "mg/dL",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Blood Glucose",
+      "group": "vitals",
+      "estimatedSamplesPerDay": 10
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBloodPressureDiastolic",
+      "kind": "quantity",
+      "unit": "mmHg",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Blood Pressure (Diastolic)",
+      "group": "vitals",
+      "estimatedSamplesPerDay": 2
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBloodPressureSystolic",
+      "kind": "quantity",
+      "unit": "mmHg",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Blood Pressure (Systolic)",
+      "group": "vitals",
+      "estimatedSamplesPerDay": 2
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBodyFatPercentage",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Body Fat %",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBodyMass",
+      "kind": "quantity",
+      "unit": "kg",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Body Weight",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBodyMassIndex",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "BMI",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierBodyTemperature",
+      "kind": "quantity",
+      "unit": "degC",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Body Temperature",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierCyclingCadence",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Cycling Cadence",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierCyclingPower",
+      "kind": "quantity",
+      "unit": "W",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Cycling Power",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierCyclingSpeed",
+      "kind": "quantity",
+      "unit": "m/s",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Cycling Speed",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryCaffeine",
+      "kind": "quantity",
+      "unit": "mg",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Caffeine",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 3
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryCarbohydrates",
+      "kind": "quantity",
+      "unit": "g",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Carbohydrates",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+      "kind": "quantity",
+      "unit": "kcal",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Dietary Energy",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryFatTotal",
+      "kind": "quantity",
+      "unit": "g",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Total Fat",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryFiber",
+      "kind": "quantity",
+      "unit": "g",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Fiber",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryProtein",
+      "kind": "quantity",
+      "unit": "g",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Protein",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietarySodium",
+      "kind": "quantity",
+      "unit": "mg",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Sodium",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietarySugar",
+      "kind": "quantity",
+      "unit": "g",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Sugar",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDietaryWater",
+      "kind": "quantity",
+      "unit": "mL",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Water",
+      "group": "nutrition",
+      "estimatedSamplesPerDay": 8
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDistanceCycling",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Cycling Distance",
+      "group": "activity",
+      "estimatedSamplesPerDay": 20
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDistanceSwimming",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Swimming Distance",
+      "group": "activity",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierDistanceWalkingRunning",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Walking + Running Distance",
+      "group": "activity",
+      "estimatedSamplesPerDay": 250
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierEnvironmentalAudioExposure",
+      "kind": "quantity",
+      "unit": "dBASPL",
+      "aggregationStyle": "discreteEquivalentContinuousLevel",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Environmental Sound",
+      "group": "other",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierEnvironmentalSoundReduction",
+      "kind": "quantity",
+      "unit": "dBASPL",
+      "aggregationStyle": "discreteEquivalentContinuousLevel",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Sound Reduction",
+      "group": "other",
+      "estimatedSamplesPerDay": 30
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierFlightsClimbed",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Flights Climbed",
+      "group": "activity",
+      "estimatedSamplesPerDay": 30
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeadphoneAudioExposure",
+      "kind": "quantity",
+      "unit": "dBASPL",
+      "aggregationStyle": "discreteEquivalentContinuousLevel",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Headphone Audio",
+      "group": "other",
+      "estimatedSamplesPerDay": 30
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeartRate",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Heart Rate",
+      "group": "heart",
+      "estimatedSamplesPerDay": 3500
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeartRateRecoveryOneMinute",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "HR Recovery (1 min)",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD",
+      "kind": "quantity",
+      "unit": "ms",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "27.0",
+      "displayName": "HRV (RMSSD)",
+      "group": "heart",
+      "estimatedSamplesPerDay": 100
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+      "kind": "quantity",
+      "unit": "ms",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "HRV (SDNN)",
+      "group": "heart",
+      "estimatedSamplesPerDay": 8
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierHeight",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Height",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierLeanBodyMass",
+      "kind": "quantity",
+      "unit": "kg",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Lean Body Mass",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierNumberOfTimesFallen",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Falls",
+      "group": "vitals",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierOxygenSaturation",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Blood Oxygen",
+      "group": "respiratory",
+      "estimatedSamplesPerDay": 30
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierPeripheralPerfusionIndex",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Perfusion Index",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierPhysicalEffort",
+      "kind": "quantity",
+      "unit": "kcal/hr*kg",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Physical Effort",
+      "group": "activity",
+      "estimatedSamplesPerDay": 100
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRespiratoryRate",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Respiratory Rate",
+      "group": "respiratory",
+      "estimatedSamplesPerDay": 120
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRestingHeartRate",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Resting Heart Rate",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRunningGroundContactTime",
+      "kind": "quantity",
+      "unit": "ms",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Ground Contact Time",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRunningPower",
+      "kind": "quantity",
+      "unit": "W",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Running Power",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRunningSpeed",
+      "kind": "quantity",
+      "unit": "m/s",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Running Speed",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRunningStrideLength",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Running Stride Length",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierRunningVerticalOscillation",
+      "kind": "quantity",
+      "unit": "cm",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Vertical Oscillation",
+      "group": "activity",
+      "estimatedSamplesPerDay": 50
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierStepCount",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Steps",
+      "group": "activity",
+      "estimatedSamplesPerDay": 250
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierSwimmingStrokeCount",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Swimming Strokes",
+      "group": "activity",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierTimeInDaylight",
+      "kind": "quantity",
+      "unit": "min",
+      "aggregationStyle": "cumulative",
+      "allowedAggregateFunctions": [
+        "sum",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Time in Daylight",
+      "group": "other",
+      "estimatedSamplesPerDay": 20
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierUVExposure",
+      "kind": "quantity",
+      "unit": "count",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "UV Exposure",
+      "group": "other",
+      "estimatedSamplesPerDay": 5
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierVO2Max",
+      "kind": "quantity",
+      "unit": "ml/kg*min",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "VO₂ Max",
+      "group": "activity",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWaistCircumference",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Waist Circumference",
+      "group": "body",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWalkingAsymmetryPercentage",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Walking Asymmetry %",
+      "group": "activity",
+      "estimatedSamplesPerDay": 30
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWalkingDoubleSupportPercentage",
+      "kind": "quantity",
+      "unit": "%",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Double Support %",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWalkingHeartRateAverage",
+      "kind": "quantity",
+      "unit": "count/min",
+      "aggregationStyle": "discreteTemporallyWeighted",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Walking HR Average",
+      "group": "heart",
+      "estimatedSamplesPerDay": 1
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWalkingSpeed",
+      "kind": "quantity",
+      "unit": "m/s",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Walking Speed",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKQuantityTypeIdentifierWalkingStepLength",
+      "kind": "quantity",
+      "unit": "m",
+      "aggregationStyle": "discreteArithmetic",
+      "allowedAggregateFunctions": [
+        "average",
+        "min",
+        "max",
+        "mostRecent",
+        "duration"
+      ],
+      "minimumIOS": "17.0",
+      "displayName": "Step Length",
+      "group": "activity",
+      "estimatedSamplesPerDay": 60
+    },
+    {
+      "identifier": "HKWorkoutTypeIdentifier",
+      "kind": "workout",
+      "unit": null,
+      "aggregationStyle": null,
+      "allowedAggregateFunctions": [],
+      "minimumIOS": "17.0",
+      "displayName": "Workouts",
+      "group": "workouts",
+      "estimatedSamplesPerDay": 2
+    }
+  ]
+}

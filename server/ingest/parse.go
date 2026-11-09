@@ -296,6 +296,7 @@ type Deletion struct {
 
 // Batch is a fully parsed NDJSON batch.
 type Batch struct {
+	familyValidated   bool
 	bodyDigest        []byte
 	Header            BatchHeader
 	Samples           []Sample
@@ -534,6 +535,23 @@ func validLocalDate(s string) bool {
 
 // ParseBatch stream-parses a gunzipped NDJSON body line by line.
 func ParseBatch(r io.Reader) (*Batch, error) {
+	return parseBatch(r, false)
+}
+
+func ParseFamilyBatch(r io.Reader) (*Batch, error) {
+	return parseBatch(r, true)
+}
+
+func parseBatch(r io.Reader, family bool) (*Batch, error) {
+	decodeLine := func(sc *bufio.Scanner, data []byte, value any) error {
+		if err := scanUnmarshal(sc, data, value); err != nil {
+			return err
+		}
+		if family {
+			return validateFamilyLine(data, value)
+		}
+		return nil
+	}
 	digest := sha256.New()
 	sc := bufio.NewScanner(io.TeeReader(r, digest))
 	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxLine+2)
@@ -546,7 +564,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 		return nil, parseErrf("empty body: missing batch header")
 	}
 	var b Batch
-	if err := scanUnmarshal(sc, sc.Bytes(), &b.Header); err != nil {
+	if err := decodeLine(sc, sc.Bytes(), &b.Header); err != nil {
 		return nil, wrapParseErr(err, "invalid batch header: %v", err)
 	}
 	// Version before anything else: a header from a future version may not
@@ -611,7 +629,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "sample %d/%d: %v", i+1, b.Header.SampleCount, err)
 		}
 		var s Sample
-		if err := scanUnmarshal(sc, line, &s); err != nil {
+		if err := decodeLine(sc, line, &s); err != nil {
 			return nil, wrapParseErr(err, "sample %d: invalid JSON: %v", i+1, err)
 		}
 		if err := validateSample(&s); err != nil {
@@ -627,7 +645,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "deletion %d/%d: %v", i+1, b.Header.DeletionCount, err)
 		}
 		var d Deletion
-		if err := scanUnmarshal(sc, line, &d); err != nil {
+		if err := decodeLine(sc, line, &d); err != nil {
 			return nil, wrapParseErr(err, "deletion %d: invalid JSON: %v", i+1, err)
 		}
 		if !isUUID(d.Deleted.UUID) {
@@ -647,7 +665,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "route %d/%d: %v", i+1, b.Header.RouteCount, err)
 		}
 		var rl RouteLine
-		if err := scanUnmarshal(sc, line, &rl); err != nil {
+		if err := decodeLine(sc, line, &rl); err != nil {
 			return nil, wrapParseErr(err, "route %d: invalid JSON: %v", i+1, err)
 		}
 		if err := validateRoute(&rl); err != nil {
@@ -669,7 +687,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "series %d/%d: %v", i+1, b.Header.SeriesCount, err)
 		}
 		var sl SeriesLine
-		if err := scanUnmarshal(sc, line, &sl); err != nil {
+		if err := decodeLine(sc, line, &sl); err != nil {
 			return nil, wrapParseErr(err, "series %d: invalid JSON: %v", i+1, err)
 		}
 		if err := validateSeries(&sl); err != nil {
@@ -690,7 +708,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "aggregate %d/%d: %v", i+1, b.Header.AggregateCount, err)
 		}
 		var al AggregateLine
-		if err := scanUnmarshal(sc, line, &al); err != nil {
+		if err := decodeLine(sc, line, &al); err != nil {
 			return nil, wrapParseErr(err, "aggregate %d: invalid JSON: %v", i+1, err)
 		}
 		if err := validateAggregate(&al); err != nil {
@@ -706,7 +724,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "activity summary %d/%d: %v", i+1, b.Header.ActivitySummaryCount, err)
 		}
 		var asl ActivitySummaryLine
-		if err := scanUnmarshal(sc, line, &asl); err != nil {
+		if err := decodeLine(sc, line, &asl); err != nil {
 			return nil, wrapParseErr(err, "activity summary %d: invalid JSON: %v", i+1, err)
 		}
 		if err := validateActivitySummary(&asl); err != nil {
@@ -721,7 +739,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 			return nil, wrapParseErr(err, "profile: %v", err)
 		}
 		var pl ProfileLine
-		if err := scanUnmarshal(sc, line, &pl); err != nil {
+		if err := decodeLine(sc, line, &pl); err != nil {
 			return nil, wrapParseErr(err, "profile: invalid JSON: %v", err)
 		}
 		if pl.Profile == nil {
@@ -746,6 +764,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 		return nil, wrapParseErr(err, "reading body: %v", err)
 	}
 	b.bodyDigest = digest.Sum(nil)
+	b.familyValidated = family
 	return &b, nil
 }
 

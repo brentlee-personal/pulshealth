@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/profile.schema.json",
+  "title": "Puls Sync Protocol v1: profile line",
+  "description": "The batch user's complete identity snapshot. It replaces everything stored: a null or absent field clears that value, {\"profile\":{}} clears all four, and the only way to leave the profile unchanged is to send no profile line. The wrapper must be a non-null object.",
+  "type": "object",
+  "required": ["profile"],
+  "properties": {
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/nullableString" },
+        "email": { "$ref": "common.schema.json#/$defs/nullableString" },
+        "dateOfBirth": { "$ref": "common.schema.json#/$defs/nullableEpochMs" },
+        "biologicalSex": { "anyOf": [{ "enum": ["female", "male", "other"] }, { "type": "null" }] }
+      }
+    }
+  }
+}

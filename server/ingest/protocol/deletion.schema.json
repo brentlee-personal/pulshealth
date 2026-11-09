@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/deletion.schema.json",
+  "title": "Puls Sync Protocol v1: deletion line",
+  "description": "A HealthKit deletion tombstone. The receiver removes the sample with this UUID (and, for a workout, its route and series points); an unknown UUID is a silent no-op.",
+  "type": "object",
+  "required": ["deleted"],
+  "properties": {
+    "deleted": {
+      "type": "object",
+      "required": ["uuid", "type"],
+      "properties": {
+        "uuid": { "$ref": "common.schema.json#/$defs/uuid" },
+        "type": { "$ref": "common.schema.json#/$defs/typeIdentifier" }
+      }
+    }
+  }
+}

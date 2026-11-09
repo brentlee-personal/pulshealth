@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/header.schema.json",
+  "title": "Puls Sync Protocol v1: batch header",
+  "description": "The first line of every batch. The count fields declare exactly how many lines of each type follow, in the fixed order samples, deletions, routes, series, aggregates, activity summaries, profile. Unknown fields must be ignored.",
+  "type": "object",
+  "required": ["batchID", "deviceID", "type", "reason", "exportedAt", "sampleCount", "deletionCount"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Protocol version of this batch. Absent means a client that predates versioning, which receivers treat as 1.",
+      "type": "integer",
+      "const": 1
+    },
+    "clientVersion": {
+      "description": "Free-form sender identification, e.g. PulsHealth/1.2.0 (build 57). Diagnostic only.",
+      "type": "string"
+    },
+    "timeZoneID": {
+      "description": "Optional current device IANA time zone. Receivers may initialize a new account calendar from it; travel must not overwrite an established account zone.",
+      "type": "string",
+      "maxLength": 100
+    },
+    "batchID": {
+      "description": "Stable per upload attempt: a retried upload re-sends the same batchID, so receivers may use it to short-circuit replays.",
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "deviceID": {
+      "description": "Opaque, stable per app install.",
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "description": "A label for the batch: the type identifier that contributed the most samples, or the string probe for the header-only connection probe. Any non-empty string is valid; receivers must not derive sample types from it.",
+      "$ref": "common.schema.json#/$defs/typeIdentifier"
+    },
+    "reason": {
+      "description": "What kind of sync produced the batch.",
+      "enum": ["backfill", "incremental", "manual", "reconciliation"]
+    },
+    "exportedAt": {
+      "description": "When the sender serialized the batch.",
+      "$ref": "common.schema.json#/$defs/epochMs"
+    },
+    "sampleCount": { "$ref": "#/$defs/count" },
+    "deletionCount": { "$ref": "#/$defs/count" },
+    "routeCount": { "$ref": "#/$defs/count" },
+    "seriesCount": { "$ref": "#/$defs/count" },
+    "aggregateCount": { "$ref": "#/$defs/count" },
+    "activitySummaryCount": { "$ref": "#/$defs/count" },
+    "profileCount": {
+      "description": "0 or 1: at most one profile line per batch.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "$defs": {
+    "count": {
+      "description": "Number of lines of one type that follow the header. Absent means 0. The reference server rejects any single count or combined business-line total above 5,000 with HTTP 413.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    }
+  }
+}

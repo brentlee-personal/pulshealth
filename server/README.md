@@ -675,6 +675,16 @@ every line type and field, the header, responses and the retry contract — is
 [`docs/protocol/README.md`](../docs/protocol/README.md); this section is the
 summary an operator needs.
 
+Device-token uploads also validate every data line against the embedded published
+schemas and type catalog before starting a health-data transaction. Quantity and
+series units must match the catalog. Known time zones and recorded offsets must
+agree at each instant. Unknown source time zones remain unverifiable and never
+use the server's local zone. Run `go generate` from `server/ingest` after changing
+the published schemas or catalog; a test compares every embedded byte with its
+source. Validation uses in-process JCS and JSON Schema libraries without network
+requests. Optional unknown fields remain accepted. This does not establish
+source identity, phone background-sync reliability or family-data admission.
+
 A client may declare the version as `"schemaVersion": 1` in the batch header
 and as the `X-Puls-Protocol: 1` request header; a request with neither is
 read as version 1. Any other version, or two declarations that disagree, is

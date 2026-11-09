@@ -73,6 +73,14 @@ Save & Apply; signing in alone uploads no Health data.
 
 ## PulsHealth Pro purchases
 
+The family-health fork's self-hosted receiver validates uploaded JSON locally
+with JCS and JSON Schema libraries. Its schemas and type catalog are embedded
+in the receiver. Validation sends no health data or schema requests to library
+maintainers or external services. Rejections keep diagnostic metadata, not
+the uploaded health-data body. These server libraries do not add dependencies
+or permissions to the iPhone app.
+
+
 The app offers optional monthly or yearly auto-renewing PulsHealth Pro
 subscriptions and a one-time Lifetime Pro purchase through Apple's StoreKit
 framework. Apple processes payments under the Apple Account

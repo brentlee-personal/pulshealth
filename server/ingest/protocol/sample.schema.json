@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/sample.schema.json",
+  "title": "Puls Sync Protocol v1: sample line",
+  "description": "One HealthKit sample. A sample line has no wrapper key; it is any line that carries uuid and kind and none of the wrapper keys (deleted, route, series, aggregate, activitySummary, profile). The kind selects which detail object must be present. Optional fields may be absent or null with identical meaning. Unknown fields must be ignored.",
+  "type": "object",
+  "required": ["uuid", "type", "kind", "start"],
+  "properties": {
+    "uuid": {
+      "description": "HKObject.uuid. The sample's identity: a receiver that already holds this UUID ignores the line.",
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "type": { "$ref": "common.schema.json#/$defs/typeIdentifier" },
+    "kind": {
+      "enum": ["quantity", "category", "workout", "heartbeatSeries", "ecg", "stateOfMind", "medicationDose"]
+    },
+    "start": { "$ref": "common.schema.json#/$defs/requiredEpochMs" },
+    "end": {
+      "description": "Absent or 0 means equal to start.",
+      "$ref": "common.schema.json#/$defs/epochMs"
+    },
+    "startContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+    "endContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+    "value": {
+      "description": "Quantity samples: the value converted to the type's canonical unit.",
+      "type": ["number", "null"]
+    },
+    "unit": {
+      "description": "Quantity samples: the canonical unit string the value is expressed in.",
+      "type": ["string", "null"]
+    },
+    "category": {
+      "description": "Category samples: the raw HKCategorySample.value (e.g. sleep stage). The reference server stores it as a 16-bit integer.",
+      "type": ["integer", "null"],
+      "minimum": -32768,
+      "maximum": 32767
+    },
+    "sourceName": { "$ref": "common.schema.json#/$defs/nullableString" },
+    "sourceBundleID": { "$ref": "common.schema.json#/$defs/nullableString" },
+    "sourceVersion": { "$ref": "common.schema.json#/$defs/nullableString" },
+    "device": { "$ref": "common.schema.json#/$defs/nullableString" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+    "workout": { "anyOf": [{ "$ref": "#/$defs/workout" }, { "type": "null" }] },
+    "heartbeats": { "anyOf": [{ "$ref": "#/$defs/heartbeats" }, { "type": "null" }] },
+    "ecg": { "anyOf": [{ "$ref": "#/$defs/ecg" }, { "type": "null" }] },
+    "stateOfMind": { "anyOf": [{ "$ref": "#/$defs/stateOfMind" }, { "type": "null" }] },
+    "medicationDose": { "anyOf": [{ "$ref": "#/$defs/medicationDose" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "category" } } },
+      "then": { "required": ["category"], "properties": { "category": { "type": "integer" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "workout" } } },
+      "then": { "required": ["workout"], "properties": { "workout": { "$ref": "#/$defs/workout" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "heartbeatSeries" } } },
+      "then": { "required": ["heartbeats"], "properties": { "heartbeats": { "$ref": "#/$defs/heartbeats" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ecg" } } },
+      "then": { "required": ["ecg"], "properties": { "ecg": { "$ref": "#/$defs/ecg" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "stateOfMind" } } },
+      "then": { "required": ["stateOfMind"], "properties": { "stateOfMind": { "$ref": "#/$defs/stateOfMind" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "medicationDose" } } },
+      "then": { "required": ["medicationDose"], "properties": { "medicationDose": { "$ref": "#/$defs/medicationDose" } } }
+    }
+  ],
+  "$defs": {
+    "workoutStat": {
+      "description": "One quantity type's statistics over a workout or activity, in the type's canonical unit. Cumulative types carry sum; discrete types carry min/avg/max.",
+      "type": "object",
+      "properties": {
+        "min": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "avg": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "max": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "sum": { "$ref": "common.schema.json#/$defs/nullableNumber" }
+      }
+    },
+    "workoutEvent": {
+      "description": "A pause/resume/lap/segment/marker/motionPaused/motionResumed event. end is absent for point events and set for spans.",
+      "type": "object",
+      "required": ["type", "start"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "start": { "$ref": "common.schema.json#/$defs/epochMs" },
+        "end": { "$ref": "common.schema.json#/$defs/nullableEpochMs" },
+        "startContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "endContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "metadata": { "$ref": "common.schema.json#/$defs/metadata" }
+      }
+    },
+    "workoutActivity": {
+      "description": "One sub-activity of a multi-sport or interval workout.",
+      "type": "object",
+      "required": ["activityType", "start", "duration"],
+      "properties": {
+        "activityType": { "type": "string", "minLength": 1 },
+        "start": { "$ref": "common.schema.json#/$defs/epochMs" },
+        "end": { "$ref": "common.schema.json#/$defs/nullableEpochMs" },
+        "startContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "endContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "duration": { "description": "Seconds.", "type": "number" },
+        "statistics": {
+          "type": ["object", "null"],
+          "additionalProperties": { "$ref": "#/$defs/workoutStat" }
+        }
+      }
+    },
+    "workout": {
+      "description": "Detail carried by kind=workout samples.",
+      "type": "object",
+      "required": ["activityType", "duration"],
+      "properties": {
+        "activityType": { "description": "Stable snake_case name, e.g. running, strength_training, hiit.", "type": "string", "minLength": 1 },
+        "duration": { "description": "Active seconds (pauses excluded).", "type": "number" },
+        "totalEnergyKcal": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "totalDistanceMeters": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "statistics": {
+          "description": "Flat per-type representative value, kept for older receivers; statisticsDetail is richer.",
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "number" }
+        },
+        "statisticsDetail": {
+          "type": ["object", "null"],
+          "additionalProperties": { "$ref": "#/$defs/workoutStat" }
+        },
+        "events": { "type": ["array", "null"], "items": { "$ref": "#/$defs/workoutEvent" } },
+        "activities": { "type": ["array", "null"], "items": { "$ref": "#/$defs/workoutActivity" } }
+      }
+    },
+    "heartbeats": {
+      "description": "Beat-to-beat offsets for kind=heartbeatSeries: each entry is [secondsSinceSeriesStart, precededByGap]. May be empty.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [{ "type": "number" }, { "type": "boolean" }],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "ecg": {
+      "description": "Detail carried by kind=ecg samples.",
+      "type": "object",
+      "required": ["classification", "symptomsStatus", "voltagesUV"],
+      "properties": {
+        "classification": { "description": "sinusRhythm, atrialFibrillation, inconclusiveLowHeartRate, inconclusiveHighHeartRate, inconclusivePoorReading, inconclusiveOther, unrecognized, notSet, or classification_<n> for values newer than the sender.", "type": "string", "minLength": 1 },
+        "averageHeartRateBpm": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "samplingFrequencyHz": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "symptomsStatus": { "description": "notSet, none, or present.", "type": "string", "minLength": 1 },
+        "voltagesUV": { "description": "Lead I trace in microvolts, one entry per measurement (typically 15,000 for a 30 s recording).", "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "stateOfMind": {
+      "description": "Detail carried by kind=stateOfMind samples (iOS 18).",
+      "type": "object",
+      "required": ["kind", "valence", "valenceClassification", "labels", "associations"],
+      "properties": {
+        "kind": { "description": "momentaryEmotion or dailyMood.", "type": "string", "minLength": 1 },
+        "valence": { "description": "-1 (very unpleasant) to +1 (very pleasant).", "type": "number", "minimum": -1, "maximum": 1 },
+        "valenceClassification": { "description": "veryUnpleasant, unpleasant, slightlyUnpleasant, neutral, slightlyPleasant, pleasant, veryPleasant.", "type": "string", "minLength": 1 },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "associations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "medicationDose": {
+      "description": "Detail carried by kind=medicationDose samples (iOS 26).",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "medication": { "description": "Display name when resolvable, else null. Never an opaque object description.", "$ref": "common.schema.json#/$defs/nullableString" },
+        "medicationID": { "description": "Optional sender-assigned UUID for the concept, scoped to the sender device identity map. Not cross-device or reinstall stable.", "anyOf": [{ "$ref": "common.schema.json#/$defs/uuid" }, { "type": "null" }] },
+        "status": { "description": "taken, skipped, snoozed, notLogged, or another HealthKit log status name.", "type": "string", "minLength": 1 },
+        "scheduledAt": { "$ref": "common.schema.json#/$defs/nullableEpochMs" },
+        "scheduledAtContext": { "$ref": "common.schema.json#/$defs/nullableTemporalContext" },
+        "doseQuantity": { "$ref": "common.schema.json#/$defs/nullableNumber" },
+        "doseUnit": { "$ref": "common.schema.json#/$defs/nullableString" }
+      }
+    }
+  }
+}

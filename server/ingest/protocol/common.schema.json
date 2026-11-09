@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/PulsHealth/pulshealth/main/docs/protocol/schema/common.schema.json",
+  "title": "Puls Sync Protocol v1: shared definitions",
+  "description": "Reusable building blocks referenced by every other schema in this directory. Nothing validates against this file directly.",
+  "$defs": {
+    "uuid": {
+      "description": "Canonical 8-4-4-4-12 hexadecimal UUID. The app sends upper case; receivers compare case-insensitively.",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "epochMs": {
+      "description": "Milliseconds since 1970-01-01T00:00:00Z as a JSON number, within 0001-01-01 to 9999-12-31T23:59:59.999Z. The app usually sends a fraction (sub-millisecond precision, e.g. 1718000000123.456); an integer is equally valid.",
+      "type": "number",
+      "minimum": -62135596800000,
+      "maximum": 253402300799999
+    },
+    "requiredEpochMs": {
+      "description": "An epochMs that must be present and non-zero: the reference server treats 0 as absent and rejects the line.",
+      "allOf": [{ "$ref": "#/$defs/epochMs" }, { "not": { "const": 0 } }]
+    },
+    "nullableEpochMs": {
+      "anyOf": [{ "$ref": "#/$defs/epochMs" }, { "type": "null" }]
+    },
+    "typeIdentifier": {
+      "description": "A HealthKit type identifier, e.g. HKQuantityTypeIdentifierHeartRate, or one of the protocol's synthetic identifiers (HKWorkoutTypeIdentifier, HKActivitySummaryTypeIdentifier).",
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableString": { "type": ["string", "null"] },
+    "nullableNumber": { "type": ["number", "null"] },
+    "temporalContext": {
+      "description": "The time zone in force when the instant it accompanies was observed. The instant itself stays UTC; this lets a receiver reconstruct local wall time.",
+      "type": "object",
+      "required": ["timeZoneID", "utcOffsetSeconds", "source", "confidence"],
+      "properties": {
+        "timeZoneID": { "description": "IANA zone name, e.g. Europe/Berlin.", "type": "string", "minLength": 1 },
+        "utcOffsetSeconds": { "type": "integer", "minimum": -86400, "maximum": 86400 },
+        "source": { "description": "How the zone was determined. The app sends device_current.", "type": "string", "minLength": 1 },
+        "confidence": { "description": "The app sends inferred.", "type": "string", "minLength": 1 },
+        "tzdbVersion": { "description": "IANA tz database release, or empty when unknown.", "type": "string" }
+      }
+    },
+    "nullableTemporalContext": {
+      "anyOf": [{ "$ref": "#/$defs/temporalContext" }, { "type": "null" }]
+    },
+    "metadata": {
+      "description": "HKObject.metadata coerced to JSON scalars. Dates arrive as epochMs numbers and HKQuantity values as plain numbers, so a receiver cannot tell them from other numbers.",
+      "type": ["object", "null"],
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    }
+  }
+}
