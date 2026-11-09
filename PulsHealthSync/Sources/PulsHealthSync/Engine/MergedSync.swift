@@ -558,23 +558,29 @@ extension HealthSyncEngine {
     ) async -> Bool {
         guard !pack.isEmpty else { return true }
 
-        let batch = SyncBatch(
-            deviceID: store.deviceID,
-            // The header type is a label only — the server registers types from
-            // the sample lines themselves and merely stores this in
-            // `batches.type_identifier`. Name the biggest contributor so the
-            // column stays meaningful for a single-type batch (unchanged from
-            // before) and informative for a merged one.
-            type: pack.max(by: { $0.count < $1.count })?.identifier ?? pack[0].identifier,
-            reason: reason,
-            samples: pack.flatMap(\.samples),
-            deletions: pack.flatMap(\.deletions),
-            routes: pack.flatMap(\.enrichment.routes),
-            series: pack.flatMap(\.enrichment.series),
-            profile: pack.compactMap(\.enrichment.profile).first
-        )
-
         do {
+            var profile = pack.compactMap(\.enrichment.profile).first
+            var observations: [UUID]?
+            if let cached = profile {
+                (profile, observations) = try await captureProfile(using: transport, legacyProfile: cached)
+            }
+            let batch = SyncBatch(
+                deviceID: store.deviceID,
+                // The header type is a label only — the server registers types from
+                // the sample lines themselves and merely stores this in
+                // `batches.type_identifier`. Name the biggest contributor so the
+                // column stays meaningful for a single-type batch (unchanged from
+                // before) and informative for a merged one.
+                type: pack.max(by: { $0.count < $1.count })?.identifier ?? pack[0].identifier,
+                reason: reason,
+                samples: pack.flatMap(\.samples),
+                deletions: pack.flatMap(\.deletions),
+                routes: pack.flatMap(\.enrichment.routes),
+                series: pack.flatMap(\.enrichment.series),
+                profile: profile,
+                sourceObservations: observations
+            )
+
             let result = try await transport.upload(batch)
             // Split the measured cost across the pages that shared the request
             // so per-type stats stay comparable with the unmerged path. Bytes

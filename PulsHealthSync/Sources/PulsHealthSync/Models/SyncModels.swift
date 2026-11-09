@@ -428,7 +428,7 @@ public struct SeriesPoint: Codable, Sendable, Equatable {
 /// server can replace the batch user's complete profile and honor cleared values.
 public struct ProfilePayload: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
-        case name, email, dateOfBirth, biologicalSex
+        case name, email, dateOfBirth, biologicalSex, capturedAt
     }
 
     public var name: String?
@@ -436,15 +436,17 @@ public struct ProfilePayload: Codable, Sendable, Equatable {
     public var dateOfBirth: Date?
     /// "female" | "male" | "other" | nil
     public var biologicalSex: String?
+    public var capturedAt: Date?
 
     public init(
         name: String? = nil, email: String? = nil,
-        dateOfBirth: Date? = nil, biologicalSex: String? = nil
+        dateOfBirth: Date? = nil, biologicalSex: String? = nil, capturedAt: Date? = nil
     ) {
         self.name = name
         self.email = email
         self.dateOfBirth = dateOfBirth
         self.biologicalSex = biologicalSex
+        self.capturedAt = capturedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -453,6 +455,7 @@ public struct ProfilePayload: Codable, Sendable, Equatable {
         email = try c.decodeIfPresent(String.self, forKey: .email)
         dateOfBirth = try c.decodeIfPresent(Date.self, forKey: .dateOfBirth)
         biologicalSex = try c.decodeIfPresent(String.self, forKey: .biologicalSex)
+        capturedAt = try c.decodeIfPresent(Date.self, forKey: .capturedAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -465,6 +468,7 @@ public struct ProfilePayload: Codable, Sendable, Equatable {
         else { try c.encodeNil(forKey: .dateOfBirth) }
         if let biologicalSex { try c.encode(biologicalSex, forKey: .biologicalSex) }
         else { try c.encodeNil(forKey: .biologicalSex) }
+        try c.encodeIfPresent(capturedAt, forKey: .capturedAt)
     }
 
     public var isEmpty: Bool {
@@ -643,6 +647,7 @@ public struct SyncBatch: Codable, Sendable {
     public var activitySummaries: [ActivitySummaryRow]
     /// Settings-backed user identity and characteristics.
     public var profile: ProfilePayload?
+    public var sourceObservations: [UUID]?
     public var exportedAt: Date
 
     public init(
@@ -650,6 +655,7 @@ public struct SyncBatch: Codable, Sendable {
         samples: [SyncSample], deletions: [SyncDeletion], routes: [RoutePayload] = [],
         series: [WorkoutSeriesPayload] = [], aggregates: [AggregateSampleRow] = [],
         activitySummaries: [ActivitySummaryRow] = [], profile: ProfilePayload? = nil,
+        sourceObservations: [UUID]? = nil,
         exportedAt: Date = Date()
     ) {
         self.batchID = batchID
@@ -663,6 +669,7 @@ public struct SyncBatch: Codable, Sendable {
         self.aggregates = aggregates
         self.activitySummaries = activitySummaries
         self.profile = profile
+        self.sourceObservations = sourceObservations
         self.exportedAt = exportedAt
     }
 

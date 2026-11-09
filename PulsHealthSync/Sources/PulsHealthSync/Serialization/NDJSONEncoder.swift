@@ -33,6 +33,7 @@ enum BatchSerializer {
         var seriesCount: Int
         var activitySummaryCount: Int
         var profileCount: Int
+        var sourceObservations: [UUID]?
 
         // State/wire compat: headers written before aggregates/series/activity
         // summaries/profile existed lack those counts; treat as 0 (mirrors the
@@ -54,6 +55,7 @@ enum BatchSerializer {
             seriesCount = try c.decodeIfPresent(Int.self, forKey: .seriesCount) ?? 0
             activitySummaryCount = try c.decodeIfPresent(Int.self, forKey: .activitySummaryCount) ?? 0
             profileCount = try c.decodeIfPresent(Int.self, forKey: .profileCount) ?? 0
+            sourceObservations = try c.decodeIfPresent([UUID].self, forKey: .sourceObservations)
         }
 
         init(
@@ -62,7 +64,7 @@ enum BatchSerializer {
             batchID: UUID, deviceID: String, type: String, reason: SyncReason,
             exportedAt: Date, sampleCount: Int, deletionCount: Int,
             routeCount: Int, aggregateCount: Int, seriesCount: Int,
-            activitySummaryCount: Int, profileCount: Int
+            activitySummaryCount: Int, profileCount: Int, sourceObservations: [UUID]? = nil
         ) {
             self.schemaVersion = schemaVersion
             self.clientVersion = clientVersion
@@ -79,6 +81,7 @@ enum BatchSerializer {
             self.seriesCount = seriesCount
             self.activitySummaryCount = activitySummaryCount
             self.profileCount = profileCount
+            self.sourceObservations = sourceObservations
         }
     }
 
@@ -123,7 +126,8 @@ enum BatchSerializer {
             routeCount: batch.routes.count, aggregateCount: batch.aggregates.count,
             seriesCount: batch.series.count,
             activitySummaryCount: batch.activitySummaries.count,
-            profileCount: batch.profile == nil ? 0 : 1
+            profileCount: batch.profile == nil ? 0 : 1,
+            sourceObservations: batch.sourceObservations
         )
         out.append(try encoder.encode(header))
         out.append(newline)

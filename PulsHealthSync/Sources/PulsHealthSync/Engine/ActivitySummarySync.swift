@@ -175,27 +175,10 @@ extension HealthSyncEngine {
 
         let runStart = ContinuousClock.now
         do {
+            let observation = try await transport.beginSourceObservation(.activitySummary)
             let rows = try await fetchActivitySummaries(from: from, to: today, calendar: calendar)
-            if !rows.isEmpty {
-                let batch = SyncBatch(
-                    deviceID: store.deviceID,
-                    type: typeID,
-                    reason: reason,
-                    samples: [],
-                    deletions: [],
-                    activitySummaries: rows
-                )
-                let uploadResult = try await transport.upload(batch)
-                await store.recordActivitySummaryUpload(
-                    newComputedThrough: today, days: rows.count, bytes: uploadResult.bytesSent)
-                await reportWakeBatch(
-                    type: typeID, samples: rows.count, deletions: 0, bytes: uploadResult.bytesSent)
-            } else {
-                // Nothing to send (e.g. no activity data yet) — still advance the
-                // watermark so we don't rescan the whole window every run.
-                await store.recordActivitySummaryUpload(
-                    newComputedThrough: today, days: 0, bytes: 0)
-            }
+            try await uploadActivitySummaryRows(rows, through: today, reason: reason,
+                transport: transport, sourceObservations: observation.map { [$0] })
             // An empty *full* pass is not a completed one: HealthKit answers a
             // denied read with an empty result, not an error, so marking it
             // complete here would leave everything older than the lookback
@@ -227,6 +210,27 @@ extension HealthSyncEngine {
             }
         }
         notifyChanged()
+    }
+
+    func uploadActivitySummaryRows(
+        _ rows: [ActivitySummaryRow], through: Date, reason: SyncReason,
+        transport: any SyncTransport, sourceObservations: [UUID]?
+    ) async throws {
+        let typeID = HealthTypeCatalog.activitySummaryIdentifier
+        if sourceObservations?.isEmpty == false, !rows.contains(where: { row in
+            row.moveKcal != nil || row.moveGoalKcal != nil || row.exerciseMin != nil
+                || row.exerciseGoalMin != nil || row.standHours != nil || row.standGoalHours != nil
+                || row.moveTimeMin != nil || row.moveTimeGoalMin != nil
+        }) { throw SyncError.readableHistoryUnknown(typeID) }
+        var bytes = 0
+        if !rows.isEmpty {
+            let batch = SyncBatch(deviceID: store.deviceID, type: typeID, reason: reason,
+                samples: [], deletions: [], activitySummaries: rows, sourceObservations: sourceObservations)
+            let result = try await transport.upload(batch)
+            bytes = result.bytesSent
+            await reportWakeBatch(type: typeID, samples: rows.count, deletions: 0, bytes: bytes)
+        }
+        await store.recordActivitySummaryUpload(newComputedThrough: through, days: rows.count, bytes: bytes)
     }
 
     /// One HKActivitySummaryQuery over [from, to] (inclusive of today), mapped to

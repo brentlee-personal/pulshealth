@@ -725,9 +725,12 @@ Legacy rows without a source remain unbound and are never adopted.
 
 An observation orders trusted SDK reads; it is not an Apple-signed revision
 or evidence of HealthKit read permission. Missing source revisions remain
-explicitly unavailable. SDK observation wiring must be deployed before
-enabling personal mutable uploads; generic Puls receivers and file exports
-do not require this family-only handshake.
+explicitly unavailable. The SDK obtains observations before aggregate chunks,
+activity queries and fresh profile reads. Workout and merged uploads capture
+one fresh profile per batch. `InstrumentedTransport` forwards observations;
+generic Puls receivers and file exports do not require this family-only
+handshake. An observed upload requires its matching family receipt even if
+the response omits the family version header.
 
 ### 7.2 Errors
 

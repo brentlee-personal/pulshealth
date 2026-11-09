@@ -1,5 +1,15 @@
 # PulsHealth Server
 
+Device-bound family uploads additionally follow the
+[source snapshot contract](../docs/protocol/README.md#source-query-observations).
+Before reading aggregates, activity summaries or the current profile, obtain
+the authenticated query observation and include it in `sourceObservations`.
+Profiles require their fresh source-side `capturedAt`. A stale or unverified
+snapshot returns 409 for the whole batch. Source profiles never change login
+identity; values from separate sources remain separate. Deploy the receiver
+and matching SDK before enabling this path. Generic shared-token examples
+below retain the original Puls contract.
+
 Configuration and operations for the self-hosted PulsHealth stack.
 **Installing for the first time? Follow [Set up your server](../docs/setup.md)**
 for Docker prerequisites, AI-assisted setup, networking, phone pairing and

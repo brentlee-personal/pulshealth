@@ -192,6 +192,38 @@ public enum TransportError: Error, LocalizedError, CustomStringConvertible {
 /// S3, etc.) can be added without touching sync logic.
 public protocol SyncTransport: Sendable {
     func upload(_ batch: SyncBatch) async throws -> UploadResult
+    func beginSourceObservation(_ query: SourceSnapshotQuery) async throws -> UUID?
+}
+
+public extension SyncTransport {
+    func beginSourceObservation(_ query: SourceSnapshotQuery) async throws -> UUID? { nil }
+}
+
+public enum SourceSnapshotQuery: Encodable, Sendable {
+    case profile
+    case activitySummary
+    case aggregate(AggregateConfig)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, type, `func`, intervalValue, intervalUnit, deviceFilter
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .profile:
+            try fields.encode("profile", forKey: .kind)
+        case .activitySummary:
+            try fields.encode("activity_summary", forKey: .kind)
+        case .aggregate(let config):
+            try fields.encode("aggregate", forKey: .kind)
+            try fields.encode(config.typeIdentifier, forKey: .type)
+            try fields.encode(config.function.rawValue, forKey: .func)
+            try fields.encode(config.intervalValue, forKey: .intervalValue)
+            try fields.encode(config.intervalUnit.rawValue, forKey: .intervalUnit)
+            try fields.encode(config.deviceFilter.rawValue, forKey: .deviceFilter)
+        }
+    }
 }
 
 /// POSTs gzip NDJSON batches to the Puls ingest server with exponential-backoff retry.
@@ -248,6 +280,31 @@ public struct HTTPSyncTransport: SyncTransport {
             samples: [], deletions: []))
     }
 
+    public func beginSourceObservation(_ query: SourceSnapshotQuery) async throws -> UUID? {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/source-observations"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(userID, forHTTPHeaderField: "X-User-ID")
+        request.setValue(String(PulsProtocol.version), forHTTPHeaderField: PulsProtocol.headerField)
+        request.httpBody = try JSONEncoder().encode(query)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw TransportError.network(URLError(.badServerResponse))
+        }
+        if http.statusCode == 404 || http.statusCode == 405 { return nil }
+        guard (200..<300).contains(http.statusCode) else {
+            throw TransportError.fromResponse(status: http.statusCode, body: data)
+        }
+        guard let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TransportError.invalidAcknowledgement
+        }
+        if fields.isEmpty { return nil }
+        guard fields.count == 1, let value = fields["observation_id"] as? String,
+              let id = UUID(uuidString: value) else { throw TransportError.invalidAcknowledgement }
+        return id
+    }
+
     public func upload(_ batch: SyncBatch) async throws -> UploadResult {
         let ndjson = try BatchSerializer.ndjson(for: batch)
         let body = BatchSerializer.gzip(ndjson)
@@ -283,6 +340,9 @@ public struct HTTPSyncTransport: SyncTransport {
                 let familyReceipt = try FamilyBatchReceipt.validateResponse(
                     data, version: http.value(forHTTPHeaderField: "X-Family-Receipt"),
                     memberID: userID, batchID: batch.batchID, ndjson: ndjson)
+                if batch.sourceObservations?.isEmpty == false, familyReceipt == nil {
+                    throw TransportError.invalidAcknowledgement
+                }
                 logger.debug("Uploaded \(batch.samples.count) samples (\(body.count) bytes gzip, \(ndjson.count) raw) in \(elapsed, format: .fixed(precision: 3))s")
                 return UploadResult(bytesSent: body.count, duration: elapsed,
                                     receipt: IngestReceipt.decode(data), familyReceipt: familyReceipt)

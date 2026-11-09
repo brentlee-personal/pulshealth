@@ -32,6 +32,10 @@ public actor InstrumentedTransport: SyncTransport {
         self.wrapped = transport
     }
 
+    public func beginSourceObservation(_ query: SourceSnapshotQuery) async throws -> UUID? {
+        try await wrapped.beginSourceObservation(query)
+    }
+
     public func upload(_ batch: SyncBatch) async throws -> UploadResult {
         let result = try await wrapped.upload(batch)
         samples.append(Sample(

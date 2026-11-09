@@ -499,7 +499,8 @@ extension HealthSyncEngine {
         chunk: DateInterval,
         pass: AggregatePass
     ) async throws -> Int {
-        try await AggregateQuery.bucketsRecovering(
+        let observation = try await transport.beginSourceObservation(.aggregate(config))
+        return try await AggregateQuery.bucketsRecovering(
             for: config, unit: unit, canonicalAnchor: anchor, calendar: calendar,
             chunk: chunk, healthStore: healthStore,
             onRecoveryStart: { _ in
@@ -511,28 +512,34 @@ extension HealthSyncEngine {
             onChunk: { rows, window in
                 try await self.uploadAggregateRows(
                     rows, config: config, configID: configID, reason: reason,
-                    transport: transport, chunk: window, pass: pass
+                    transport: transport, chunk: window, pass: pass,
+                    sourceObservations: observation.map { [$0] }
                 )
             }
         )
     }
 
-    private func uploadAggregateRows(
+    func uploadAggregateRows(
         _ rows: [AggregateSampleRow],
         config: AggregateConfig,
         configID: UUID,
         reason: SyncReason,
         transport: any SyncTransport,
         chunk: DateInterval,
-        pass: AggregatePass
+        pass: AggregatePass,
+        sourceObservations: [UUID]?
     ) async throws {
+        if sourceObservations?.isEmpty == false, !rows.contains(where: { $0.value != nil }) {
+            throw SyncError.readableHistoryUnknown(config.typeIdentifier)
+        }
         let batch = SyncBatch(
             deviceID: store.deviceID,
             type: config.typeIdentifier,
             reason: reason,
             samples: [],
             deletions: [],
-            aggregates: rows
+            aggregates: rows,
+            sourceObservations: sourceObservations
         )
         let uploadResult = try await transport.upload(batch)
         switch pass {

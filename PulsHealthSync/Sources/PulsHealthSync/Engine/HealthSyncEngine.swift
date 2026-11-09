@@ -848,19 +848,32 @@ public actor HealthSyncEngine {
         defer { activeSyncs.remove(key) }
         await ensureTransport()
         guard let transport else { throw TransportError.notConfigured }
-        let config = await store.configuration
-        let profile = config.userProfilePayload
+        let (profile, observations) = try await captureProfile(using: transport)
         let batch = SyncBatch(
             deviceID: store.deviceID,
             type: HealthTypeCatalog.workoutIdentifier,
             reason: reason,
             samples: [],
             deletions: [],
-            profile: profile
+            profile: profile,
+            sourceObservations: observations
         )
         let result = try await transport.upload(batch)
         await reportWakeBatch(type: "profile", samples: 0, deletions: 0, bytes: result.bytesSent)
         await eventLog.log(.info, "User profile uploaded")
+    }
+
+    func captureProfile(
+        using transport: any SyncTransport, legacyProfile: ProfilePayload? = nil
+    ) async throws -> (ProfilePayload, [UUID]?) {
+        let observation = try await transport.beginSourceObservation(.profile)
+        if observation == nil, let legacyProfile { return (legacyProfile, nil) }
+        var profile = await store.configuration.userProfilePayload
+        if let observation {
+            profile.capturedAt = Date()
+            return (profile, [observation])
+        }
+        return (profile, nil)
     }
 
     /// The page after `page`, or nil when `page` was short — a short raw page
@@ -988,6 +1001,11 @@ public actor HealthSyncEngine {
                     continue
                 }
 
+                var profile = page.enrichment.profile
+                var observations: [UUID]?
+                if let cached = profile {
+                    (profile, observations) = try await captureProfile(using: transport, legacyProfile: cached)
+                }
                 let batch = SyncBatch(
                     deviceID: store.deviceID,
                     type: identifier,
@@ -996,7 +1014,8 @@ public actor HealthSyncEngine {
                     deletions: page.deletions,
                     routes: page.enrichment.routes,
                     series: page.enrichment.series,
-                    profile: page.enrichment.profile
+                    profile: profile,
+                    sourceObservations: observations
                 )
                 let uploadResult = try await transport.upload(batch)
 

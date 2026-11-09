@@ -15,6 +15,22 @@ the Swift package.
 - [On-device export](#on-device-export) and [exploration](#exploring-what-healthkit-holds): APIs that do not advance sync progress.
 - [Testing](#testing): run the package checks.
 
+## Family snapshot observations
+
+For a family receiver, the HTTP transport obtains a source observation before
+each aggregate chunk, activity-summary query or fresh settings-profile read.
+The uploaded header carries that observation; a profile also carries its
+source-side capture time. Workout and merged batches refresh one profile at
+batch construction instead of attaching a new observation to cached values.
+`InstrumentedTransport` forwards this handshake. File and dry-run transports
+use the protocol's default nil result; HTTP 404/405 or `{}` retain legacy
+receiver behavior. Other failures stop the pass.
+
+Observed batches require a complete matching family receipt even if the
+response omits the family marker. Unknown aggregate or ring reads do not
+upload clears or advance progress. Existing readable-history limits remain
+in force. See the [wire contract](../docs/protocol/README.md#source-query-observations).
+
 ## Source map
 
 All paths below are under `Sources/PulsHealthSync/`. Read the section for the
