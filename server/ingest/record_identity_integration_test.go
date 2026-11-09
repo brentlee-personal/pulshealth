@@ -96,10 +96,12 @@ func TestIntegration_FamilyHealthSameRecordIDAcrossSources(t *testing.T) {
 		t.Error("independent sources did not preserve both records with the same raw ID")
 	}
 	for _, credential := range actors {
-		var ids []string
+		var result struct {
+			UUIDs []string `json:"uuids"`
+		}
 		path := "/v1/uuids?type=HKQuantityTypeIdentifierHeartRate&from=1717977600000&to=1718150400000"
-		if status := f.get(t, credential, path, &ids); status != http.StatusOK || !reflect.DeepEqual(ids, []string{sample}) {
-			t.Fatalf("source UUIDs status=%d, ids=%v", status, ids)
+		if status := f.get(t, credential, path, &result); status != http.StatusOK || !reflect.DeepEqual(result.UUIDs, []string{sample}) {
+			t.Fatalf("source UUIDs status=%d, ids=%v", status, result.UUIDs)
 		}
 		var windows []DigestWindow
 		if status := f.get(t, credential, strings.Replace(path, "/uuids?", "/digest?", 1), &windows); status != http.StatusOK || len(windows) != 1 || windows[0].Rows != 1 || windows[0].Digest != strings.ReplaceAll(sample, "-", "") {
