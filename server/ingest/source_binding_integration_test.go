@@ -134,3 +134,22 @@ func TestIntegration_FamilyHealthSourceLockDoesNotGrantOtherMembers(t *testing.T
 		}
 	}
 }
+
+func TestIntegration_FamilyHealthBatchForeignKeyBindsCredentialOwner(t *testing.T) {
+	f := familyTestSetup(t)
+	var tokenID, generation int64
+	if err := f.admin.QueryRow(f.ctx, "SELECT id, device_generation FROM device_tokens WHERE user_id=$1", f.actors[1].user).Scan(&tokenID, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.admin.Exec(f.ctx, `INSERT INTO batches(batch_id,user_id,device_token_id,device_generation)
+		VALUES($1,$2,$3,$4)`, f.uuid(0x6f0), f.actors[0].user, tokenID, generation); err == nil {
+		t.Fatal("batch foreign key accepted another member's credential")
+	}
+	var count int
+	if err := f.admin.QueryRow(f.ctx, "SELECT count(*) FROM batches WHERE user_id=$1", f.actors[0].user).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("invalid credential owner left a batch")
+	}
+}
