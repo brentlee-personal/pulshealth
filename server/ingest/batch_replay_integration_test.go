@@ -131,12 +131,20 @@ func TestIntegration_FamilyHealthLostAcknowledgement(t *testing.T) {
 		WHERE user_id=$1 AND batch_id=$2`, f.actors[0].user, batch).Scan(&transaction, &committedJSON); err != nil {
 		t.Fatal(err)
 	}
-	var committed map[string]json.RawMessage
+	var committed map[string]any
 	if err := json.Unmarshal(committedJSON, &committed); err != nil {
 		t.Fatal(err)
 	}
 	status, retry := f.post(t, f.actors[0], body)
-	if status != http.StatusOK || !reflect.DeepEqual(committed, retry) {
+	retryJSON, err := json.Marshal(retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replay map[string]any
+	if err := json.Unmarshal(retryJSON, &replay); err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || !reflect.DeepEqual(committed, replay) {
 		t.Fatal("retry after lost response did not return the committed receipt")
 	}
 	var replayTransaction string
