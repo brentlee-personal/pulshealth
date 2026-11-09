@@ -229,26 +229,11 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 		// concurrent uploads or ordinary profile updates. Never create
 		// a missing device-token owner: authentication may have happened before
 		// deletion committed while the request body was still uploading.
-		var owner string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM users WHERE id = $1 FOR KEY SHARE`, userID).Scan(&owner); err != nil {
-			return res, fmt.Errorf("lock authenticated user: %w", err)
+		writer, err := lockFamilyWriter(ctx, tx, userID, b.Header.DeviceTokenID)
+		if err != nil {
+			return res, err
 		}
-		var tokenID int64
-		if err := tx.QueryRow(ctx, `SELECT id, device_generation, source_connection_id::text, credential_id::text FROM device_tokens
-			WHERE id = $1 AND user_id = $2 AND status = 'active' FOR SHARE`,
-			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation, &sourceConnectionID, &credentialID); err != nil {
-			return res, fmt.Errorf("revalidate device token: %w", err)
-		}
-		if sourceConnectionID == nil {
-			return res, errSourceBinding
-		}
-		var activeSource bool
-		if err := tx.QueryRow(ctx, `SELECT family_apple_source_active($1, $2)`, userID, *sourceConnectionID).Scan(&activeSource); err != nil {
-			return res, fmt.Errorf("revalidate source connection: %w", err)
-		}
-		if !activeSource {
-			return res, errSourceBinding
-		}
+		generation, credentialID, sourceConnectionID = writer.generation, writer.credentialID, &writer.sourceID
 	} else if err := ensureUser(ctx, tx, userID); err != nil {
 		// Self-hosted shared tokens retain their legacy create-on-first-upload behavior.
 		return res, fmt.Errorf("ensure user: %w", err)

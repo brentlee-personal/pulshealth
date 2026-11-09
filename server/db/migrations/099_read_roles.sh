@@ -170,6 +170,9 @@ BEGIN
   IF to_regclass('public.family_record_identity') IS NOT NULL THEN
     REVOKE ALL ON TABLE family_record_identity FROM grafana;
   END IF;
+  IF to_regclass('public.family_source_observations') IS NOT NULL THEN
+    REVOKE ALL ON TABLE family_source_observations FROM grafana;
+  END IF;
   IF to_regclass('public.family_workout_references') IS NOT NULL THEN
     REVOKE ALL ON TABLE family_workout_references, family_source_tombstones FROM grafana;
   END IF;
@@ -554,6 +557,7 @@ FROM (VALUES
   ('family_record_identity', ARRAY['SELECT', 'INSERT']),
   ('family_workout_references', ARRAY['SELECT', 'INSERT']),
   ('family_source_tombstones', ARRAY['SELECT', 'INSERT']),
+  ('family_source_observations', ARRAY['SELECT', 'INSERT', 'UPDATE']),
   ('family_source_connections', ARRAY['SELECT', 'INSERT']),
   ('family_device_generations', ARRAY['SELECT', 'INSERT']),
   -- RecordRejection: a plain INSERT, never read back.

@@ -268,6 +268,7 @@ func connectWithRetry(ctx context.Context, url string, logger *slog.Logger) (*pg
 // ingester abstracts Store so handlers can be unit-tested without a database.
 type ingester interface {
 	InsertBatch(ctx context.Context, b *Batch, bodyBytes int64) (IngestResult, error)
+	BeginSourceObservation(ctx context.Context, userID string, tokenID int64, queryKey string) (string, error)
 	RecordRejection(ctx context.Context, rejection IngestRejection) error
 	Stats(ctx context.Context, scope recordScope) ([]TypeStats, error)
 	Digest(ctx context.Context, scope recordScope, identifier string, from, to time.Time) ([]DigestWindow, error)
@@ -324,6 +325,7 @@ func newServer(store ingester, tokens tokenResolver, sharedToken string, allowSh
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/batches", s.auth(s.handleBatch))
+	mux.HandleFunc("POST /v1/source-observations", s.auth(s.handleSourceObservation))
 	mux.HandleFunc("GET /v1/stats", s.auth(s.handleStats))
 	mux.HandleFunc("GET /v1/digest", s.auth(s.handleDigest))
 	mux.HandleFunc("GET /v1/uuids", s.auth(s.handleUUIDs))

@@ -737,6 +737,9 @@ func (f *fakeStore) RecordRejection(_ context.Context, rejection IngestRejection
 	f.rejections = append(f.rejections, rejection)
 	return f.rejectionErr
 }
+func (f *fakeStore) BeginSourceObservation(context.Context, string, int64, string) (string, error) {
+	return "", errors.New("source observations require the real database store")
+}
 func (f *fakeStore) Stats(_ context.Context, scope recordScope) ([]TypeStats, error) {
 	f.gotUserID = scope.userID
 	return []TypeStats{}, nil

@@ -679,6 +679,29 @@ Content blocked by a source tombstone counts as suppressed. The outer
 legacy counters still describe physical rows or points and need not match
 these line counts.
 
+#### Source query observations
+
+`POST /v1/source-observations` accepts an authenticated JSON query of at most
+4 KiB. `kind` is `profile`, `activity_summary` or `aggregate`. An aggregate
+also requires its catalog `type`, allowed `func`, positive signed-32-bit
+`intervalValue`, `intervalUnit` and `deviceFilter`, using the existing aggregate
+line vocabulary. Profile and activity-summary requests carry only `kind`.
+Unknown fields, duplicate keys and malformed JSON are rejected. The request
+cannot choose a member, source or credential.
+
+A device-bound response contains the server-generated UUID in `observation_id`.
+The database retains one current observation per member, source and query
+stream, with a monotonically increasing sequence and five-minute expiry.
+Issuing another query for that stream invalidates the previous observation.
+Issuance rechecks the active credential and source in its transaction.
+Legacy shared-token mode returns `{}` without creating an observation.
+
+This endpoint currently supplies the query-order primitive. Personal mutable
+uploads remain refused until their snapshot consumer and SDK query wiring
+are implemented and tested. An observation is not an Apple-signed revision
+or evidence of HealthKit read permission. Missing source revisions remain
+explicitly unavailable.
+
 ### 7.2 Errors
 
 Error bodies are JSON `{"error": "<message>"}`; the app shows the first 200
