@@ -167,6 +167,10 @@ BEGIN
   IF to_regclass('public.family_batch_receipts') IS NOT NULL THEN
     REVOKE ALL ON TABLE family_batch_receipts FROM grafana;
   END IF;
+  IF to_regclass('public.family_source_connections') IS NOT NULL THEN
+    REVOKE ALL ON TABLE family_source_connections FROM grafana;
+    REVOKE ALL ON TABLE family_device_generations FROM grafana;
+  END IF;
 END
 $$;
 
@@ -541,6 +545,8 @@ FROM (VALUES
   -- and Stats' last-batch times.
   ('batches',                ARRAY['SELECT', 'INSERT', 'UPDATE']),
   ('family_batch_receipts',  ARRAY['SELECT', 'INSERT', 'UPDATE']),
+  ('family_source_connections', ARRAY['SELECT', 'INSERT']),
+  ('family_device_generations', ARRAY['SELECT', 'INSERT']),
   -- RecordRejection: a plain INSERT, never read back.
   ('ingest_rejections',      ARRAY['INSERT']),
   -- ResolveDeviceToken (lookup, last_seen_at), and the CLI's issue, revoke,
@@ -585,6 +591,14 @@ END
 $$;
 GRANT CONNECT ON DATABASE :"DBNAME" TO ingest;
 GRANT USAGE ON SCHEMA public TO ingest;
+
+DO $$
+BEGIN
+  IF to_regprocedure('public.family_apple_source_active(uuid,uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION family_apple_source_active(uuid, uuid) TO ingest;
+  END IF;
+END
+$$;
 
 -- InsertBatch opens every transaction with this SET LOCAL. Prove the role may
 -- set it now, on every migrate run, instead of finding out as 500s on the first batch if

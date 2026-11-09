@@ -143,6 +143,15 @@ but SHOULD answer over-limit input with **413**, which the app does not retry.
 | All header counts combined | 5,000 business lines, excluding the header |
 | Points per route or series line | 4,000 (the sender chunks longer streams) |
 | Route points per batch, series points per batch | 100,000 each |
+
+Personal device credentials bind the member, Apple Health source connection,
+and device generation in the database. Client device names, install IDs and
+body fields cannot choose that binding. Re-pairing to the sole active personal
+source preserves its identity and creates a new device generation. Multiple
+possible sources require an explicit trusted pairing choice; they are not
+merged. The protected local source fingerprint identifies this local binding,
+not a verified Apple account ID. Pre-migration credentials remain unbound and
+must be re-enrolled before personal uploads can commit.
 | Time to accept one batch | the sender gives up after 60 s ([8.1](#81-retry-contract)); the reference server bounds its own database work at 5 minutes and finishes the commit even if the client disconnects |
 
 ## 3. The batch

@@ -24,6 +24,7 @@ type familyTestActor struct {
 type familyTestFixture struct {
 	ctx    context.Context
 	admin  *pgxpool.Pool
+	store  *Store
 	server *httptest.Server
 	actors [2]familyTestActor
 	run    int64
@@ -40,6 +41,7 @@ func familyTestSetup(t *testing.T) *familyTestFixture {
 	t.Cleanup(pool.Close)
 	f := &familyTestFixture{ctx: ctx, admin: adminPool(t, ctx), run: time.Now().UnixNano()}
 	store := NewStore(pool)
+	f.store = store
 	for i := range f.actors {
 		user := f.uuid(0x600 + i)
 		plain, _, err := store.IssueDeviceToken(ctx, user, "synthetic family fixture")

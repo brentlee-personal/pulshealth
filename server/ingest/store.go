@@ -150,6 +150,8 @@ type RouteMetricSeries struct {
 // lost a deadlock or serialization race (see InsertBatch).
 const maxInsertRetries = 3
 
+var errSourceBinding = errors.New("source connection requires verified pairing")
+
 // InsertBatch applies one batch atomically: lazily registers types and
 // sources, bulk-inserts samples via unnest with ON CONFLICT DO NOTHING
 // (idempotent for client retries), applies deletions, and records the batch.
@@ -213,6 +215,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	// conflict and exit without replaying upserts, deletions, or profile changes.
 	userID := b.Header.UserID
 	var generation int64
+	var sourceConnectionID *string
 	if userID == "" {
 		userID = defaultUserID
 	}
@@ -226,10 +229,20 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 			return res, fmt.Errorf("lock authenticated user: %w", err)
 		}
 		var tokenID int64
-		if err := tx.QueryRow(ctx, `SELECT id, device_generation FROM device_tokens
+		if err := tx.QueryRow(ctx, `SELECT id, device_generation, source_connection_id::text FROM device_tokens
 			WHERE id = $1 AND user_id = $2 AND status = 'active' FOR SHARE`,
-			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation); err != nil {
+			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation, &sourceConnectionID); err != nil {
 			return res, fmt.Errorf("revalidate device token: %w", err)
+		}
+		if sourceConnectionID == nil {
+			return res, errSourceBinding
+		}
+		var activeSource bool
+		if err := tx.QueryRow(ctx, `SELECT family_apple_source_active($1, $2)`, userID, *sourceConnectionID).Scan(&activeSource); err != nil {
+			return res, fmt.Errorf("revalidate source connection: %w", err)
+		}
+		if !activeSource {
+			return res, errSourceBinding
 		}
 	} else if err := ensureUser(ctx, tx, userID); err != nil {
 		// Self-hosted shared tokens retain their legacy create-on-first-upload behavior.
