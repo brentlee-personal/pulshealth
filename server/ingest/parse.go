@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gowebpki/jcs"
 )
 
 // Wire protocol types. Timestamps arrive as epoch milliseconds (JSON numbers,
@@ -776,11 +778,14 @@ func nextLine(sc *bufio.Scanner) ([]byte, error) {
 // error. Prefer and preserve that error (notably *http.MaxBytesError) over the
 // secondary JSON syntax error caused by the truncated token.
 func scanUnmarshal(sc *bufio.Scanner, data []byte, v any) error {
-	err := json.Unmarshal(data, v)
 	if scanErr := sc.Err(); scanErr != nil {
 		return scanErr
 	}
-	return err
+	canonical, err := jcs.Transform(data)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(canonical, v)
 }
 
 func validateSample(s *Sample) error {

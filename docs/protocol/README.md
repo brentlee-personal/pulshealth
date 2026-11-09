@@ -116,6 +116,12 @@ The app produces gzip with its own framing (10-byte header, raw DEFLATE,
 CRC-32 and length trailer) so any standard gzip decoder reads it, and gzip
 typically shrinks health-sample JSON about 10×.
 
+The family receiver validates each line as I-JSON before typed decoding.
+Duplicate object keys, invalid UTF-8, unpaired Unicode surrogates and numbers
+outside the finite IEEE 754 range are rejected with HTTP 400. Valid unknown
+optional fields remain ignored. This validation uses RFC 8785 JCS; request
+replay digests still cover the original decompressed bytes, including newlines.
+
 ### 2.4 User identity
 
 Authentication proves access to the receiver; `X-User-ID` selects the
