@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestIntegration_FamilyHealthAccountPurgeIncludesFamilyMetadata(t *testing.T) {
@@ -54,5 +57,63 @@ func TestIntegration_FamilyHealthAccountPurgeIncludesFamilyMetadata(t *testing.T
 	}
 	if otherRows != 1 {
 		t.Fatal("one member's purge erased another member's same-ID sample")
+	}
+}
+
+func TestIntegration_FamilyHealthMetadataCredentialBindingRemainsRequiredAtCommit(t *testing.T) {
+	f := familyTestSetup(t)
+	actor := f.actors[0]
+	if status, _ := f.post(t, actor, f.body(f.uuid(0x830), f.uuid(0x831), 62.5)); status != http.StatusOK {
+		t.Fatalf("prepare metadata status=%d", status)
+	}
+	if status, _ := beginFamilyObservation(t, f, actor, `{"kind":"profile"}`); status != http.StatusOK {
+		t.Fatalf("prepare metadata observation status=%d", status)
+	}
+	var otherSource string
+	if err := f.admin.QueryRow(f.ctx, `INSERT INTO family_source_connections(user_id,provider,binding_method)
+		VALUES($1,'apple_health','local_member_pairing') RETURNING id::text`, actor.user).Scan(&otherSource); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := newDeviceToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(f.ctx, `INSERT INTO device_tokens(token_hash,token_prefix,user_id,name,source_connection_id)
+		VALUES($1,$2,$3,'explicit synthetic metadata source',$4)`, hashToken(plain), tokenPrefix(plain), actor.user, otherSource); err != nil {
+		t.Fatal(err)
+	}
+	for _, wrong := range []struct{ name, token string }{
+		{"different member", f.actors[1].token}, {"different source", plain},
+	} {
+		var credential string
+		if err := f.admin.QueryRow(f.ctx, `SELECT credential_id::text FROM device_tokens WHERE token_hash=$1`, hashToken(wrong.token)).Scan(&credential); err != nil {
+			t.Fatal(err)
+		}
+		for _, relation := range []struct{ table, column string }{
+			{"family_record_identity", "first_credential_id"}, {"family_source_observations", "credential_id"},
+		} {
+			t.Run(wrong.name+"/"+relation.table, func(t *testing.T) {
+				tx, err := f.admin.Begin(f.ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(f.ctx)
+				if _, err := tx.Exec(f.ctx, "UPDATE "+relation.table+" SET "+relation.column+"=$1 WHERE user_id=$2", credential, actor.user); err != nil {
+					t.Fatalf("credential reference was not deferred to the transaction boundary: %v", err)
+				}
+				err = tx.Commit(f.ctx)
+				var constraint *pgconn.PgError
+				if !errors.As(err, &constraint) || constraint.Code != "23503" {
+					t.Fatal("foreign member or source credential committed into family metadata")
+				}
+				var unchanged bool
+				if err := f.admin.QueryRow(f.ctx, "SELECT "+relation.column+"<>$1 FROM "+relation.table+" WHERE user_id=$2", credential, actor.user).Scan(&unchanged); err != nil {
+					t.Fatal(err)
+				}
+				if !unchanged {
+					t.Fatal("failed credential constraint left modified metadata")
+				}
+			})
+		}
 	}
 }
