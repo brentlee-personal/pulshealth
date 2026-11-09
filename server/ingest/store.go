@@ -382,21 +382,27 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 		res.SeriesPoints = n
 	}
 
-	if err := upsertUser(ctx, tx, userID, b.Profile); err != nil {
-		return res, fmt.Errorf("upsert user: %w", err)
-	}
-
 	seriesIDs, err := ensureAggregateSeries(ctx, tx, b.Aggregates, typeIDs)
 	if err != nil {
 		return res, fmt.Errorf("ensure aggregate series: %w", err)
 	}
-	if n, err := upsertAggregateSamples(ctx, tx, b.Aggregates, typeIDs, seriesIDs, temporalContextIDs, userID); err != nil {
+	if sourceConnectionID != nil {
+		if err := prepareFamilySnapshots(ctx, tx, b, userID, *sourceConnectionID, credentialID, typeIDs, seriesIDs); err != nil {
+			return res, err
+		}
+		if err := upsertFamilyProfile(ctx, tx, userID, *sourceConnectionID, b.Profile); err != nil {
+			return res, fmt.Errorf("upsert source profile: %w", err)
+		}
+	} else if err := upsertUser(ctx, tx, userID, b.Profile); err != nil {
+		return res, fmt.Errorf("upsert user: %w", err)
+	}
+	if n, err := upsertAggregateSamples(ctx, tx, b.Aggregates, typeIDs, seriesIDs, temporalContextIDs, userID, sourceConnectionID); err != nil {
 		return res, fmt.Errorf("upsert aggregate samples: %w", err)
 	} else {
 		res.AggregateSamples = n
 	}
 
-	if n, err := upsertActivitySummaries(ctx, tx, b.ActivitySummaries, temporalContextIDs, userID); err != nil {
+	if n, err := upsertActivitySummaries(ctx, tx, b.ActivitySummaries, temporalContextIDs, userID, sourceConnectionID); err != nil {
 		return res, fmt.Errorf("upsert activity summaries: %w", err)
 	} else {
 		res.ActivitySummaries = n
@@ -1354,7 +1360,7 @@ func ensureAggregateSeries(ctx context.Context, tx pgx.Tx, aggs []AggregateLine,
 // null value) and bump updated_at.
 func upsertAggregateSamples(ctx context.Context, tx pgx.Tx, aggs []AggregateLine,
 	typeIDs map[string]int16, seriesIDs map[aggSeriesKey]int16,
-	temporalContextIDs map[temporalContextKey]int32, userID string) (int64, error) {
+	temporalContextIDs map[temporalContextKey]int32, userID string, sourceID *string) (int64, error) {
 	if len(aggs) == 0 {
 		return 0, nil
 	}
@@ -1422,20 +1428,20 @@ func upsertAggregateSamples(ctx context.Context, tx pgx.Tx, aggs []AggregateLine
 			INSERT INTO aggregate_samples (series_id, bucket_start, bucket_end,
 			                               bucket_start_temporal_context_id,
 			                               bucket_end_temporal_context_id,
-			                               value, user_id)
+			                               value, user_id, source_connection_id)
 			SELECT x.series_id, x.bucket_start, x.bucket_end,
 			       x.bucket_start_temporal_context_id, x.bucket_end_temporal_context_id,
-			       x.value, $7::uuid
+			       x.value, $7::uuid, $8::uuid
 			FROM unnest($1::smallint[], $2::timestamptz[], $3::timestamptz[],
 			            $4::integer[], $5::integer[], $6::float8[])
 			     AS x(series_id, bucket_start, bucket_end,
 			          bucket_start_temporal_context_id, bucket_end_temporal_context_id, value)
-			ON CONFLICT (series_id, bucket_start, user_id)
+			ON CONFLICT (user_id, source_scope, series_id, bucket_start)
 			DO UPDATE SET value = EXCLUDED.value, bucket_end = EXCLUDED.bucket_end,
 			              bucket_start_temporal_context_id = EXCLUDED.bucket_start_temporal_context_id,
 			              bucket_end_temporal_context_id = EXCLUDED.bucket_end_temporal_context_id,
 			              updated_at = now()`,
-		sids, starts, ends, startContextIDs, endContextIDs, values, userID)
+		sids, starts, ends, startContextIDs, endContextIDs, values, userID, sourceID)
 	if err != nil {
 		return 0, err
 	}
@@ -1447,7 +1453,7 @@ func upsertAggregateSamples(ctx context.Context, tx pgx.Tx, aggs []AggregateLine
 // rings keep changing), so conflicts overwrite every column (including
 // overwriting with NULL for explicit nulls) and bump updated_at.
 func upsertActivitySummaries(ctx context.Context, tx pgx.Tx, summaries []ActivitySummaryLine,
-	temporalContextIDs map[temporalContextKey]int32, userID string) (int64, error) {
+	temporalContextIDs map[temporalContextKey]int32, userID string, sourceID *string) (int64, error) {
 	if len(summaries) == 0 {
 		return 0, nil
 	}
@@ -1474,6 +1480,9 @@ func upsertActivitySummaries(ctx context.Context, tx pgx.Tx, summaries []Activit
 		d, err := activitySummaryDateKey(a)
 		if err != nil {
 			return 0, err
+		}
+		if sourceID != nil {
+			d = familyActivityDate(a.LocalDate, a.Date)
 		}
 		r := asRow{
 			date: d, contextID: temporalContextID(temporalContextIDs, a.TemporalContext),
@@ -1524,17 +1533,17 @@ func upsertActivitySummaries(ctx context.Context, tx pgx.Tx, summaries []Activit
 		INSERT INTO activity_summaries (date, user_id, move_kcal, move_goal_kcal, exercise_min,
 		                                exercise_goal_min, stand_hours, stand_goal_hours,
 		                                move_mode, move_time_min, move_time_goal_min,
-		                                temporal_context_id)
+		                                temporal_context_id, source_connection_id)
 		SELECT x.date::date, $12::uuid, x.move_kcal, x.move_goal_kcal, x.exercise_min,
 		       x.exercise_goal_min, x.stand_hours, x.stand_goal_hours,
 		       x.move_mode, x.move_time_min, x.move_time_goal_min,
-		       x.temporal_context_id
+		       x.temporal_context_id, $13::uuid
 		FROM unnest($1::text[], $2::integer[], $3::float8[], $4::float8[], $5::float8[],
 		            $6::float8[], $7::float8[], $8::float8[], $9::smallint[],
 		            $10::float8[], $11::float8[])
 		     AS x(date, temporal_context_id, move_kcal, move_goal_kcal, exercise_min, exercise_goal_min,
 		          stand_hours, stand_goal_hours, move_mode, move_time_min, move_time_goal_min)
-		ON CONFLICT (user_id, date) DO UPDATE SET
+		ON CONFLICT (user_id, source_scope, date) DO UPDATE SET
 			move_kcal = EXCLUDED.move_kcal, move_goal_kcal = EXCLUDED.move_goal_kcal,
 			exercise_min = EXCLUDED.exercise_min, exercise_goal_min = EXCLUDED.exercise_goal_min,
 			stand_hours = EXCLUDED.stand_hours, stand_goal_hours = EXCLUDED.stand_goal_hours,
@@ -1543,7 +1552,7 @@ func upsertActivitySummaries(ctx context.Context, tx pgx.Tx, summaries []Activit
 			temporal_context_id = EXCLUDED.temporal_context_id,
 			updated_at = now()`,
 		dates, contextIDs, moveKcal, moveGoal, exerciseMin, exerciseGoal, standHours, standGoal,
-		moveMode, moveTimeMin, moveTimeGoal, userID)
+		moveMode, moveTimeMin, moveTimeGoal, userID, sourceID)
 	if err != nil {
 		return 0, err
 	}

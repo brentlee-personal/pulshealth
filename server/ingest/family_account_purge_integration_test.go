@@ -16,8 +16,8 @@ func TestIntegration_FamilyHealthAccountPurgeIncludesFamilyMetadata(t *testing.T
 		if status, _ := f.post(t, actor, body); status != http.StatusOK {
 			t.Fatalf("prepare purge sample status=%d", status)
 		}
-		if status, _ := beginFamilyObservation(t, f, actor, `{"kind":"profile"}`); status != http.StatusOK {
-			t.Fatalf("prepare purge observation status=%d", status)
+		if status, _ := f.post(t, actor, familyCompleteSnapshot(t, f, actor, 0x822, 61)); status != http.StatusOK {
+			t.Fatalf("prepare purge snapshots status=%d", status)
 		}
 	}
 	_, otherReceipt := f.post(t, f.actors[1], body)
@@ -33,9 +33,10 @@ func TestIntegration_FamilyHealthAccountPurgeIncludesFamilyMetadata(t *testing.T
 		t.Fatalf("family-backed account purge was rejected: %v", err)
 	}
 	for _, table := range []string{
+		"family_snapshot_identity", "family_source_profiles",
 		"family_record_identity", "family_workout_references", "family_source_tombstones",
 		"family_batch_receipts", "family_source_observations", "family_device_generations",
-		"family_source_connections", "quantity_samples", "batches", "device_tokens",
+		"family_source_connections", "quantity_samples", "aggregate_samples", "activity_summaries", "batches", "device_tokens",
 	} {
 		var remaining int
 		if err := f.admin.QueryRow(f.ctx, "SELECT count(*) FROM "+table+" WHERE user_id=$1", f.actors[0].user).Scan(&remaining); err != nil {
@@ -58,6 +59,14 @@ func TestIntegration_FamilyHealthAccountPurgeIncludesFamilyMetadata(t *testing.T
 	if otherRows != 1 {
 		t.Fatal("one member's purge erased another member's same-ID sample")
 	}
+	for table, expected := range map[string]int{"family_snapshot_identity": 4, "family_source_profiles": 1, "aggregate_samples": 2, "activity_summaries": 1} {
+		if err := f.admin.QueryRow(f.ctx, "SELECT count(*) FROM "+table+" WHERE user_id=$1", f.actors[1].user).Scan(&otherRows); err != nil {
+			t.Fatal(err)
+		}
+		if otherRows != expected {
+			t.Fatalf("one member's purge changed another member's snapshots in %s", table)
+		}
+	}
 }
 
 func TestIntegration_FamilyHealthMetadataCredentialBindingRemainsRequiredAtCommit(t *testing.T) {
@@ -66,8 +75,8 @@ func TestIntegration_FamilyHealthMetadataCredentialBindingRemainsRequiredAtCommi
 	if status, _ := f.post(t, actor, f.body(f.uuid(0x830), f.uuid(0x831), 62.5)); status != http.StatusOK {
 		t.Fatalf("prepare metadata status=%d", status)
 	}
-	if status, _ := beginFamilyObservation(t, f, actor, `{"kind":"profile"}`); status != http.StatusOK {
-		t.Fatalf("prepare metadata observation status=%d", status)
+	if status, _ := f.post(t, actor, familyCompleteSnapshot(t, f, actor, 0x832, 61)); status != http.StatusOK {
+		t.Fatalf("prepare metadata snapshots status=%d", status)
 	}
 	var otherSource string
 	if err := f.admin.QueryRow(f.ctx, `INSERT INTO family_source_connections(user_id,provider,binding_method)
@@ -91,6 +100,7 @@ func TestIntegration_FamilyHealthMetadataCredentialBindingRemainsRequiredAtCommi
 		}
 		for _, relation := range []struct{ table, column string }{
 			{"family_record_identity", "first_credential_id"}, {"family_source_observations", "credential_id"},
+			{"family_snapshot_identity", "first_credential_id"}, {"family_snapshot_identity", "last_credential_id"},
 		} {
 			t.Run(wrong.name+"/"+relation.table, func(t *testing.T) {
 				tx, err := f.admin.Begin(f.ctx)
@@ -107,7 +117,7 @@ func TestIntegration_FamilyHealthMetadataCredentialBindingRemainsRequiredAtCommi
 					t.Fatal("foreign member or source credential committed into family metadata")
 				}
 				var unchanged bool
-				if err := f.admin.QueryRow(f.ctx, "SELECT "+relation.column+"<>$1 FROM "+relation.table+" WHERE user_id=$2", credential, actor.user).Scan(&unchanged); err != nil {
+				if err := f.admin.QueryRow(f.ctx, "SELECT bool_and("+relation.column+"<>$1) FROM "+relation.table+" WHERE user_id=$2", credential, actor.user).Scan(&unchanged); err != nil {
 					t.Fatal(err)
 				}
 				if !unchanged {

@@ -3,4 +3,4 @@
 {"aggregate":{"type":"HKQuantityTypeIdentifierStepCount","func":"sum","intervalValue":1,"intervalUnit":"day","deviceFilter":"all","bucketStart":1718000000000,"bucketEnd":1718086400000,"value":null,"unit":"count"}}
 {"activitySummary":{"date":1718000000000,"localDate":"2024-06-10","temporalContext":{"timeZoneID":"America/Los_Angeles","utcOffsetSeconds":-25200,"source":"device_current","confidence":"inferred"},"moveKcal":420.5,"moveGoalKcal":600.0,"exerciseMin":25.0,"exerciseGoalMin":30.0,"standHours":9.0,"standGoalHours":12.0,"moveMode":0,"moveTimeMin":null,"moveTimeGoalMin":null}}
 {"activitySummary":{"date":1718086400000,"moveKcal":null,"moveGoalKcal":600.0,"exerciseMin":null,"exerciseGoalMin":30.0,"standHours":null,"standGoalHours":12.0,"moveMode":1,"moveTimeMin":0.0,"moveTimeGoalMin":30.0}}
-{"profile":{"name":null,"email":null,"dateOfBirth":631152000000,"biologicalSex":"male"}}
+{"profile":{"name":null,"email":null,"dateOfBirth":631152000000,"biologicalSex":"male","capturedAt":1718000000100}}

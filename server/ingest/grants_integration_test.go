@@ -41,6 +41,8 @@ var ingestGrants = map[string]string{
 	"family_workout_references":  "INSERT SELECT",
 	"family_source_tombstones":   "INSERT SELECT",
 	"family_source_observations": "INSERT UPDATE SELECT",
+	"family_snapshot_identity": "INSERT UPDATE SELECT",
+	"family_source_profiles": "INSERT UPDATE SELECT",
 	"family_source_connections":  "INSERT SELECT",
 	"family_device_generations":  "INSERT SELECT",
 	"ingest_rejections":          "INSERT",

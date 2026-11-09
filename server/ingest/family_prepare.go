@@ -37,9 +37,6 @@ func familySourceDeleted(ctx context.Context, tx pgx.Tx, userID, sourceID, rawID
 }
 
 func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userID, sourceID, credentialID string) (*Batch, error) {
-	if len(original.Aggregates) > 0 || len(original.ActivitySummaries) > 0 || original.Profile != nil {
-		return nil, errSourceSnapshot
-	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,360006))", userID+":"+sourceID); err != nil {
 		return nil, err
 	}

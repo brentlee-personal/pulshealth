@@ -696,11 +696,38 @@ Issuing another query for that stream invalidates the previous observation.
 Issuance rechecks the active credential and source in its transaction.
 Legacy shared-token mode returns `{}` without creating an observation.
 
-This endpoint currently supplies the query-order primitive. Personal mutable
-uploads remain refused until their snapshot consumer and SDK query wiring
-are implemented and tested. An observation is not an Apple-signed revision
+Before reading a mutable source snapshot, a family client requests an
+observation for that query stream, then includes its UUID in the batch
+header's optional `sourceObservations` array. IDs must be distinct UUIDs;
+the array contains at most 5,000 entries. An uncommitted personal snapshot
+must match the current, unexpired observation for its authenticated member,
+source, credential and query stream. A missing or stale observation rejects
+the whole batch with 409. An exact replay of a committed batch returns its
+original receipt even after that observation expires or is superseded.
+
+Snapshot identities and values are scoped to the authenticated source.
+Aggregates and activity summaries replace whole values, including explicit
+null buckets or omitted ring values. A batch containing only unknown
+aggregate values for a query stream, or no actual ring values, is refused;
+it cannot prove an empty readable history. Clients must also retain the
+readable-history clamps before querying. A refused upload never advances
+its watermark. Within one batch the last line for a key wins; each input
+line still contributes one receipt outcome. Reusing an observation in a
+different batch cannot change a previously committed object's content.
+
+A family profile additionally requires `capturedAt`, the epoch-ms instant
+of the fresh source-side settings read after observation issuance. This
+time is not the batch export time or an edit revision. The four profile
+values replace the source profile, without changing the account's login
+identity. An omitted `localDate` on a family activity summary uses the UTC
+date as its storage fallback, while the recorded source day stays unknown.
+Legacy rows without a source remain unbound and are never adopted.
+
+An observation orders trusted SDK reads; it is not an Apple-signed revision
 or evidence of HealthKit read permission. Missing source revisions remain
-explicitly unavailable.
+explicitly unavailable. SDK observation wiring must be deployed before
+enabling personal mutable uploads; generic Puls receivers and file exports
+do not require this family-only handshake.
 
 ### 7.2 Errors
 

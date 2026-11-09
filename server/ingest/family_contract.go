@@ -94,8 +94,19 @@ var familyProtocol = sync.OnceValues(func() (*familyProtocolContract, error) {
 
 func validateFamilyLine(data []byte, value any) error {
 	var name string
-	switch value.(type) {
+	switch item := value.(type) {
 	case *BatchHeader:
+		if len(item.SourceObservations) > maxBatchLines {
+			return errFamilyRecord
+		}
+		seen := map[string]bool{}
+		for _, id := range item.SourceObservations {
+			key := strings.ToLower(id)
+			if !isUUID(id) || seen[key] {
+				return errFamilyRecord
+			}
+			seen[key] = true
+		}
 		return nil
 	case *Sample:
 		name = "sample"

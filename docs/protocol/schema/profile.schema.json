@@ -9,6 +9,7 @@
     "profile": {
       "type": "object",
       "properties": {
+        "capturedAt": { "description": "Optional source-side settings snapshot capture time. Required by the family receiver; not an edit revision or the batch export time.", "$ref": "common.schema.json#/$defs/nullableEpochMs" },
         "name": { "$ref": "common.schema.json#/$defs/nullableString" },
         "email": { "$ref": "common.schema.json#/$defs/nullableString" },
         "dateOfBirth": { "$ref": "common.schema.json#/$defs/nullableEpochMs" },

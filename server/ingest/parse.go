@@ -33,18 +33,19 @@ type BatchHeader struct {
 	// the X-Wake-ID / X-Wake-Trigger headers (the iOS wake that produced this
 	// upload). Both optional — absent for older clients, curl, and work outside a
 	// wake (e.g. reconciliation).
-	WakeID               string  `json:"-"`
-	Trigger              string  `json:"-"`
-	Type                 string  `json:"type"`
-	Reason               string  `json:"reason"`
-	ExportedAt           float64 `json:"exportedAt"`
-	SampleCount          int     `json:"sampleCount"`
-	DeletionCount        int     `json:"deletionCount"`
-	RouteCount           int     `json:"routeCount"`           // optional; 0 for old clients
-	AggregateCount       int     `json:"aggregateCount"`       // optional; 0 for old clients
-	SeriesCount          int     `json:"seriesCount"`          // optional; 0 for old clients
-	ActivitySummaryCount int     `json:"activitySummaryCount"` // optional; 0 for old clients
-	ProfileCount         int     `json:"profileCount"`         // optional; 0 or 1
+	WakeID               string   `json:"-"`
+	Trigger              string   `json:"-"`
+	Type                 string   `json:"type"`
+	Reason               string   `json:"reason"`
+	ExportedAt           float64  `json:"exportedAt"`
+	SampleCount          int      `json:"sampleCount"`
+	DeletionCount        int      `json:"deletionCount"`
+	RouteCount           int      `json:"routeCount"`           // optional; 0 for old clients
+	AggregateCount       int      `json:"aggregateCount"`       // optional; 0 for old clients
+	SeriesCount          int      `json:"seriesCount"`          // optional; 0 for old clients
+	ActivitySummaryCount int      `json:"activitySummaryCount"` // optional; 0 for old clients
+	ProfileCount         int      `json:"profileCount"`         // optional; 0 or 1
+	SourceObservations   []string `json:"sourceObservations,omitempty"`
 	// SchemaVersion is the wire-format version the client encoded this batch
 	// with (PROTO-1). Nil (absent or null) is a client that predates
 	// versioning and is read with version-1 semantics; any value outside
@@ -234,6 +235,7 @@ type ProfileSnapshot struct {
 	Email         *string  `json:"email"`
 	DateOfBirth   *float64 `json:"dateOfBirth"` // epoch ms
 	BiologicalSex *string  `json:"biologicalSex"`
+	CapturedAt    *float64 `json:"capturedAt,omitempty"`
 }
 
 // ProfileLine carries a required, non-null profile wrapper. A pointer lets the

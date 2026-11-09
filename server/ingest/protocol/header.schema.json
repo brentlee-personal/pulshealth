@@ -52,6 +52,13 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 1
+    },
+    "sourceObservations": {
+      "description": "Optional family receiver query observations issued before reading mutable snapshots.",
+      "type": "array",
+      "maxItems": 5000,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/uuid" }
     }
   },
   "$defs": {

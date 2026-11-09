@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,28 @@ func TestParseFamilyBatchSourceContract(t *testing.T) {
 				t.Fatal("invalid source returned a usable batch")
 			}
 		})
+	}
+}
+
+func TestParseFamilyObservationHeader(t *testing.T) {
+	for _, item := range []struct {
+		ids   []string
+		valid bool
+	}{
+		{nil, true},
+		{[]string{"A1000000-0000-4000-8000-000000000001"}, true},
+		{[]string{"not-a-uuid"}, false},
+		{[]string{"A1000000-0000-4000-8000-000000000001", "a1000000-0000-4000-8000-000000000001"}, false},
+	} {
+		data, err := json.Marshal(item.ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		header := strings.TrimSuffix(probeLine, "}") + `,"sourceObservations":` + string(data) + "}\n"
+		_, err = ParseFamilyBatch(strings.NewReader(header))
+		if (err == nil) != item.valid {
+			t.Fatalf("observation header accepted=%v, want %v", err == nil, item.valid)
+		}
 	}
 }
 
