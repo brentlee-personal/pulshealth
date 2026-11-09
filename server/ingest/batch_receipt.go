@@ -48,18 +48,33 @@ func reserveBatchReceipt(ctx context.Context, tx pgx.Tx, b *Batch, userID string
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, fmt.Errorf("decode committed receipt: %w", err)
 	}
+	if generation > 0 && result.FamilyReceipt == nil {
+		return nil, errBatchConflict
+	}
 	result.DuplicateBatch = true
 	return &result, nil
 }
 
 func finishBatchReceipt(ctx context.Context, tx pgx.Tx, b *Batch, userID string, generation int64, result *IngestResult) error {
+	result.receipt = &committedBatchReceipt{}
+	if err := tx.QueryRow(ctx, `SELECT transaction_id::text,clock_timestamp()
+		FROM family_batch_receipts WHERE user_id=$1 AND device_generation=$2 AND batch_id=$3`,
+		userID, generation, b.Header.BatchID).Scan(&result.receipt.TransactionID, &result.receipt.CommittedAt); err != nil {
+		return err
+	}
+	if generation > 0 {
+		var err error
+		result.FamilyReceipt, err = buildFamilyReceipt(b, userID, generation, result, result.receipt)
+		if err != nil {
+			return err
+		}
+	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
-	result.receipt = &committedBatchReceipt{}
-	return tx.QueryRow(ctx, `UPDATE family_batch_receipts SET result=$4::jsonb, committed_at=clock_timestamp()
+	return tx.QueryRow(ctx, `UPDATE family_batch_receipts SET result=$4::jsonb, committed_at=$5
 		WHERE user_id=$1 AND device_generation=$2 AND batch_id=$3
-		RETURNING transaction_id::text, committed_at`, userID, generation, b.Header.BatchID, payload).
+		RETURNING transaction_id::text, committed_at`, userID, generation, b.Header.BatchID, payload, result.receipt.CommittedAt).
 		Scan(&result.receipt.TransactionID, &result.receipt.CommittedAt)
 }

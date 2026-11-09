@@ -296,6 +296,7 @@ type Deletion struct {
 
 // Batch is a fully parsed NDJSON batch.
 type Batch struct {
+	familyCounts      familyLineCounts
 	suppressedSamples int
 	sourceDeleted     int64
 	familyValidated   bool

@@ -33,16 +33,17 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // IngestResult mirrors the wire response.
 type IngestResult struct {
 	receipt           *committedBatchReceipt
-	Accepted          int64 `json:"accepted"`
-	Deleted           int64 `json:"deleted"`
-	Duplicates        int64 `json:"duplicates"`
-	RoutePoints       int64 `json:"routePoints"`
-	SeriesPoints      int64 `json:"seriesPoints"`
-	AggregateSamples  int64 `json:"aggregateSamples"`
-	ActivitySummaries int64 `json:"activitySummaries"`
-	DuplicateBatch    bool  `json:"-"`
+	FamilyReceipt     *FamilyBatchReceipt `json:"receipt,omitempty"`
+	Accepted          int64               `json:"accepted"`
+	Deleted           int64               `json:"deleted"`
+	Duplicates        int64               `json:"duplicates"`
+	RoutePoints       int64               `json:"routePoints"`
+	SeriesPoints      int64               `json:"seriesPoints"`
+	AggregateSamples  int64               `json:"aggregateSamples"`
+	ActivitySummaries int64               `json:"activitySummaries"`
+	DuplicateBatch    bool                `json:"-"`
 	// Server-side re-runs after a lost deadlock/serialization race (see InsertBatch).
-	Retries int `json:"retries,omitempty"`
+	Retries int `json:"-"`
 }
 
 // IngestRejection is the durable operational record for an authenticated batch

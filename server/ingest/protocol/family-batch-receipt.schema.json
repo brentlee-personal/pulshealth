@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulshealth.com/protocol/v1/schema/family-batch-receipt.schema.json",
+  "type": "object",
+  "properties": {
+    "member_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "device_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "body_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "state": {
+      "const": "committed"
+    },
+    "record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000
+    },
+    "accepted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duplicate": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "deleted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "suppressed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "transaction_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "committed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
+  },
+  "required": [
+    "member_id",
+    "device_generation",
+    "batch_id",
+    "body_digest",
+    "state",
+    "record_count",
+    "accepted",
+    "duplicate",
+    "deleted",
+    "suppressed",
+    "transaction_id",
+    "committed_at"
+  ],
+  "additionalProperties": false
+}

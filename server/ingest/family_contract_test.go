@@ -25,8 +25,8 @@ func TestFamilyProtocolMatchesPublishedContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(contract.schemas) != 10 {
-		t.Fatalf("compiled schemas=%d, want 10", len(contract.schemas))
+	if len(contract.schemas) != 11 {
+		t.Fatalf("compiled schemas=%d, want 11", len(contract.schemas))
 	}
 	entries, err := protocolFiles.ReadDir("protocol")
 	if err != nil {

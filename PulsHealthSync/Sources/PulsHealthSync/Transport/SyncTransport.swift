@@ -8,14 +8,16 @@ public struct UploadResult: Sendable {
     public var duration: TimeInterval
     /// What the server said it did with the batch, when it said anything
     /// (`docs/protocol/README.md` § 7.1). Nil for a receiver that answers
-    /// with an empty or unrecognised body — the upload is acked by the 2xx
-    /// status, never by this.
+    /// with an empty or unrecognised body. Family uploads additionally require
+    /// the structured acknowledgement below.
     public var receipt: IngestReceipt?
+    public var familyReceipt: FamilyBatchReceipt?
 
-    public init(bytesSent: Int, duration: TimeInterval, receipt: IngestReceipt? = nil) {
+    public init(bytesSent: Int, duration: TimeInterval, receipt: IngestReceipt? = nil, familyReceipt: FamilyBatchReceipt? = nil) {
         self.bytesSent = bytesSent
         self.duration = duration
         self.receipt = receipt
+        self.familyReceipt = familyReceipt
     }
 }
 
@@ -76,6 +78,7 @@ public enum TransportError: Error, LocalizedError, CustomStringConvertible {
     case notConfigured
     case serverError(status: Int, body: String)
     case network(Error)
+    case invalidAcknowledgement
     /// HTTP 400 `{"error":"unsupported protocol version","supportedVersions":[…]}`:
     /// the server does not speak `PulsProtocol.version`. Distinct from
     /// `serverError` so the UI can name the cause instead of showing a raw 400.
@@ -94,6 +97,8 @@ public enum TransportError: Error, LocalizedError, CustomStringConvertible {
             return "Server returned \(status): \(ErrorScrubber.scrub(summary, limit: ErrorScrubber.displayLimit))"
         case .network(let error):
             return "Network error: \(ErrorScrubber.scrub(error.localizedDescription, limit: ErrorScrubber.displayLimit))"
+        case .invalidAcknowledgement:
+            return "Server acknowledgement did not match the uploaded batch"
         case .unsupportedProtocol(let versions):
             // Built from integers only — nothing here needs scrubbing.
             let list = versions.isEmpty ? "none" : versions.map(String.init).joined(separator: ", ")
@@ -113,6 +118,7 @@ public enum TransportError: Error, LocalizedError, CustomStringConvertible {
         case .notConfigured: return false
         case .serverError(let status, _): return status >= 500 || status == 429
         case .network(let error): return !Self.isTerminal(error)
+        case .invalidAcknowledgement: return false
         case .unsupportedProtocol: return false
         }
     }
@@ -131,6 +137,7 @@ public enum TransportError: Error, LocalizedError, CustomStringConvertible {
         case .serverError(let status, _):
             return (400..<500).contains(status) && status != 408 && status != 429
         case .network(let error): return Self.isTerminal(error)
+        case .invalidAcknowledgement: return true
         case .unsupportedProtocol: return true
         }
     }
@@ -273,11 +280,12 @@ public struct HTTPSyncTransport: SyncTransport {
                     }
                     throw TransportError.fromResponse(status: http.statusCode, body: data)
                 }
+                let familyReceipt = try FamilyBatchReceipt.validateResponse(
+                    data, version: http.value(forHTTPHeaderField: "X-Family-Receipt"),
+                    memberID: userID, batchID: batch.batchID, ndjson: ndjson)
                 logger.debug("Uploaded \(batch.samples.count) samples (\(body.count) bytes gzip, \(ndjson.count) raw) in \(elapsed, format: .fixed(precision: 3))s")
-                // The 2xx is the ack; the body is a courtesy. Whatever it
-                // holds — the reference server's counts, nothing, an HTML
-                // page from a proxy — the upload has succeeded.
-                return UploadResult(bytesSent: body.count, duration: elapsed, receipt: IngestReceipt.decode(data))
+                return UploadResult(bytesSent: body.count, duration: elapsed,
+                                    receipt: IngestReceipt.decode(data), familyReceipt: familyReceipt)
             } catch {
                 // A cancelled request surfaces as URLError.cancelled, which would
                 // otherwise count as a retryable network error and burn a backoff

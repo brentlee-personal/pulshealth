@@ -519,15 +519,10 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		"insert_ms", insertDur.Milliseconds(),
 		"retries", res.Retries,
 	)
-	writeJSON(w, http.StatusOK, map[string]int64{
-		"accepted":          res.Accepted,
-		"deleted":           res.Deleted,
-		"duplicates":        res.Duplicates,
-		"routePoints":       res.RoutePoints,
-		"seriesPoints":      res.SeriesPoints,
-		"aggregateSamples":  res.AggregateSamples,
-		"activitySummaries": res.ActivitySummaries,
-	})
+	if res.FamilyReceipt != nil {
+		w.Header().Set("X-Family-Receipt", familyReceiptVersion)
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // acquireBatchSlot takes one of the batch slots, waiting up to batchSlotWait

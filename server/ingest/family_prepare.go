@@ -44,6 +44,9 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 		return nil, err
 	}
 	prepared := *original
+	prepared.familyCounts = familyLineCounts{deleted: int64(len(original.Deletions))}
+	type pointKey struct{ table, id string }
+	seenPoints := map[pointKey]bool{}
 	prepared.Samples = nil
 	prepared.Routes = nil
 	prepared.Series = nil
@@ -63,6 +66,7 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 		}
 		if deleted {
 			prepared.suppressedSamples++
+			prepared.familyCounts.suppressed++
 			continue
 		}
 		content, digest, facts, err := normalizeFamilySample(&sample)
@@ -108,20 +112,29 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 			return nil, err
 		}
 		if deleted {
+			prepared.familyCounts.suppressed++
 			continue
 		}
 		parent, err := familyWorkoutReference(ctx, tx, userID, sourceID, rawParent)
 		if err != nil {
 			return nil, err
 		}
+		newLine := false
 		for _, point := range line.Route.Points {
-			if err := refuseUnboundFamilyPoint(ctx, tx, userID, sourceID, parent, "workout_route_points", "", point.T); err != nil {
+			stored, err := familyPointStored(ctx, tx, userID, sourceID, parent, "workout_route_points", "", point.T)
+			if err != nil {
 				return nil, err
 			}
 			id, err := familyCompositeID([]any{strings.ToLower(rawParent), point.T})
 			if err != nil {
 				return nil, err
 			}
+			key := pointKey{"workout_route_points", id}
+			if !stored && !seenPoints[key] {
+				newLine = true
+				prepared.familyCounts.routePoints++
+			}
+			seenPoints[key] = true
 			value := struct {
 				WorkoutUUID string     `json:"workoutUUID"`
 				Point       RoutePoint `json:"point"`
@@ -137,6 +150,11 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 		}
 		line.Route.WorkoutUUID = parent
 		prepared.Routes = append(prepared.Routes, line)
+		if newLine {
+			prepared.familyCounts.accepted++
+		} else {
+			prepared.familyCounts.duplicate++
+		}
 	}
 	for _, line := range original.Series {
 		rawParent := line.Series.WorkoutUUID
@@ -145,20 +163,29 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 			return nil, err
 		}
 		if deleted {
+			prepared.familyCounts.suppressed++
 			continue
 		}
 		parent, err := familyWorkoutReference(ctx, tx, userID, sourceID, rawParent)
 		if err != nil {
 			return nil, err
 		}
+		newLine := false
 		for _, point := range line.Series.Points {
-			if err := refuseUnboundFamilyPoint(ctx, tx, userID, sourceID, parent, "workout_series_points", line.Series.Type, point.T); err != nil {
+			stored, err := familyPointStored(ctx, tx, userID, sourceID, parent, "workout_series_points", line.Series.Type, point.T)
+			if err != nil {
 				return nil, err
 			}
 			id, err := familyCompositeID([]any{strings.ToLower(rawParent), line.Series.Type, point.T})
 			if err != nil {
 				return nil, err
 			}
+			key := pointKey{"workout_series_points", id}
+			if !stored && !seenPoints[key] {
+				newLine = true
+				prepared.familyCounts.seriesPoints++
+			}
+			seenPoints[key] = true
 			value := struct {
 				WorkoutUUID string      `json:"workoutUUID"`
 				Type        string      `json:"type"`
@@ -175,38 +202,37 @@ func prepareFamilyRecords(ctx context.Context, tx pgx.Tx, original *Batch, userI
 		}
 		line.Series.WorkoutUUID = parent
 		prepared.Series = append(prepared.Series, line)
+		if newLine {
+			prepared.familyCounts.accepted++
+		} else {
+			prepared.familyCounts.duplicate++
+		}
 	}
 	return &prepared, nil
 }
 
-func refuseUnboundFamilyPoint(ctx context.Context, tx pgx.Tx, userID, sourceID, parent, table, identifier string, instant float64) error {
-	var query string
-	switch table {
-	case "workout_route_points":
-		query = `SELECT EXISTS(SELECT 1 FROM workout_route_points p WHERE p.user_id=$1 AND p.workout_uuid=$3 AND p.ts=$4
-			AND NOT EXISTS(SELECT 1 FROM family_record_identity r WHERE r.user_id=p.user_id AND r.source_connection_id=$2
-				AND r.physical_table='workout_route_points' AND r.physical_parent_uuid=p.workout_uuid AND r.physical_start=p.ts))`
-	case "workout_series_points":
-		query = `SELECT EXISTS(SELECT 1 FROM workout_series_points p JOIN sample_types t USING(type_id)
-			WHERE p.user_id=$1 AND p.workout_uuid=$3 AND p.ts=$4 AND t.identifier=$5
-			AND NOT EXISTS(SELECT 1 FROM family_record_identity r WHERE r.user_id=p.user_id AND r.source_connection_id=$2
-				AND r.physical_table='workout_series_points' AND r.physical_parent_uuid=p.workout_uuid
-				AND r.physical_start=p.ts AND r.physical_type=t.identifier))`
-	default:
-		return errFamilyRecord
+func familyPointStored(ctx context.Context, tx pgx.Tx, userID, sourceID, parent, table, identifier string, instant float64) (bool, error) {
+	if table != "workout_route_points" && table != "workout_series_points" {
+		return false, errFamilyRecord
 	}
-	args := []any{userID, sourceID, parent, msToTime(instant)}
+	query := "WITH points AS (SELECT user_id,workout_uuid,ts FROM " + table + ` p
+		WHERE p.user_id=$1 AND p.workout_uuid=$3 AND p.ts=$4`
 	if table == "workout_series_points" {
-		args = append(args, identifier)
+		query += ` AND p.type_id=(SELECT type_id FROM sample_types WHERE identifier=$6)`
 	}
-	var unbound bool
-	if err := tx.QueryRow(ctx, query, args...).Scan(&unbound); err != nil {
-		return err
+	query += `) SELECT EXISTS(SELECT 1 FROM points),EXISTS(SELECT 1 FROM points p
+		WHERE NOT EXISTS(SELECT 1 FROM family_record_identity r WHERE r.user_id=p.user_id
+			AND r.source_connection_id=$2 AND r.physical_table=$5
+			AND r.physical_parent_uuid=p.workout_uuid AND r.physical_start=p.ts
+			AND ($5<>'workout_series_points' OR r.physical_type=$6)))`
+	var stored, unbound bool
+	if err := tx.QueryRow(ctx, query, userID, sourceID, parent, msToTime(instant), table, identifier).Scan(&stored, &unbound); err != nil {
+		return false, err
 	}
 	if unbound {
-		return errSourceBinding
+		return false, errSourceBinding
 	}
-	return nil
+	return stored, nil
 }
 
 func familyCompositeID(parts []any) (string, error) {

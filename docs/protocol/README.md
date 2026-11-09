@@ -649,6 +649,32 @@ the smoke test can check them.
 Counts describe the first committed application, not new writes made while
 returning a cached receipt. The optional Puls v1 JSON count fields are unchanged.
 
+#### Family receiver acknowledgement
+
+An authenticated family receiver adds `X-Family-Receipt:
+family-health-batch-receipt-v1` and a nested `receipt` object conforming to
+[`family-batch-receipt.schema.json`](schema/family-batch-receipt.schema.json).
+It commits the receipt with the data and returns it only after commit.
+An identical batch retry returns the original transaction, timestamp and counts.
+A personal batch stored before this receipt format cannot be acknowledged by
+inventing a replacement receipt; the receiver returns 409.
+
+The updated SDK checks the member, batch ID, exact decoded NDJSON SHA-256,
+generation, committed state, UTC timestamp and complete business-line counts
+before an upload succeeds. A malformed, missing or mismatched family receipt
+fails the upload and leaves the cursor unchanged. The header or a nested
+receipt activates this check; unmarked third-party Puls receivers retain
+their existing 2xx acknowledgement behavior. This does not pin server
+capabilities across connections or prove a real phone's sync behavior.
+
+`record_count` excludes the header. `accepted`, `duplicate`, `deleted` and
+`suppressed` are nonnegative and sum to it. A route or series line with at
+least one new point is accepted; an entirely repeated line is duplicate.
+Source-deletion lines, including unknown deletions, count as deleted.
+Content blocked by a source tombstone counts as suppressed. The outer
+legacy counters still describe physical rows or points and need not match
+these line counts.
+
 ### 7.2 Errors
 
 Error bodies are JSON `{"error": "<message>"}`; the app shows the first 200
