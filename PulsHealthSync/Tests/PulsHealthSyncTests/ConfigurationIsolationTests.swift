@@ -154,11 +154,20 @@ extension ConfigurationIsolationTests {
         #expect(await engine.configure(a))
         let aRequests = RequestRecorder()
         let bRequests = RequestRecorder()
+        let observations = RequestRecorder()
         MockURLProtocol.register(host: aHost) { request in
+            if request.request.url?.path == "/v1/source-observations" {
+                observations.append(request)
+                return .http(404, Data())
+            }
             aRequests.append(request)
             return .http(aRequests.all.count == 1 ? 503 : 204, Data())
         }
         MockURLProtocol.register(host: bHost) { request in
+            if request.request.url?.path == "/v1/source-observations" {
+                observations.append(request)
+                return .http(404, Data())
+            }
             bRequests.append(request)
             return .http(204, Data())
         }
@@ -191,6 +200,11 @@ extension ConfigurationIsolationTests {
         #expect(aRequests.all.count == 2)
         #expect(bRequests.all.count == 1)
         #expect(bRequests.all.first?.request.value(forHTTPHeaderField: "Authorization") == "Bearer beta")
+        #expect(observations.all.count == 2)
+        #expect(observations.all.first?.request.url?.host == aHost)
+        #expect(observations.all.last?.request.url?.host == bHost)
+        #expect(observations.all.first?.request.value(forHTTPHeaderField: "Authorization") == "Bearer alpha")
+        #expect(observations.all.last?.request.value(forHTTPHeaderField: "Authorization") == "Bearer beta")
     }
 }
 

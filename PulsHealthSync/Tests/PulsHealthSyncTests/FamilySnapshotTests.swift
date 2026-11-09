@@ -95,6 +95,19 @@ import Testing
         #expect(try await DryRunTransport().beginSourceObservation(.profile) == nil)
     }
 
+    @Test func failedObservationDoesNotFallBackOrUploadCachedProfile() async throws {
+        let recorder = RequestRecorder()
+        let transport = http { item in recorder.append(item); return .http(503, Data("{}".utf8)) }
+        let engine = ConcurrentUploadTests().makeEngine()
+        await engine.setTransport(transport)
+        do {
+            try await engine.syncProfile()
+            Issue.record("Failed observation acknowledged a cached profile")
+        } catch TransportError.serverError(let status, _) { #expect(status == 503) }
+        #expect(recorder.all.count == 1)
+        #expect(recorder.all.first?.request.url?.path == "/v1/source-observations")
+    }
+
     @Test func wireRetainsObservationAndSourceCaptureTime() throws {
         let id = UUID()
         let captured = Date(timeIntervalSince1970: 1_767_225_600)
