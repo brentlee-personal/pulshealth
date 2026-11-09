@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/gowebpki/jcs"
 	"github.com/jackc/pgx/v5"
@@ -223,7 +222,7 @@ func familyPointRecord(recordType, id string, value any, unit *string, instant f
 	missing := unavailableFamilyFact("not_provided")
 	content := familyRecordContent{SchemaVersion: "family-health-record-v1", Provider: "apple_health", SourceRecordID: id, RecordType: recordType,
 		SourceDevice: missing, SourceApp: missing, OriginalValue: value, Value: value, OriginalUnit: unit, Unit: unit,
-		StartAt: msToTime(instant).UTC().Format(time.RFC3339Nano), EndAt: msToTime(instant).UTC().Format(time.RFC3339Nano),
+		StartAt: familySourceTime(instant), EndAt: familySourceTime(instant),
 		SourceRevision: missing, Operation: "upsert"}
 	content.SourceTimeZone, content.SourceOffset = familyTimeFacts(context)
 	content.SourceEndTimeZone, content.SourceEndOffset = familyTimeFacts(context)

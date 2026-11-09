@@ -115,8 +115,8 @@ func normalizeFamilySample(sample *Sample) (familyRecordContent, []byte, []byte,
 		SourceRecordID: strings.ToLower(sample.UUID), RecordType: sample.Type,
 		SourceDevice: familyStringFact(sample.Device), SourceApp: familyStringFact(app),
 		OriginalValue: value, Value: value, OriginalUnit: unit, Unit: unit,
-		StartAt:        msToTime(sample.Start).UTC().Format(time.RFC3339Nano),
-		EndAt:          msToTime(sample.End).UTC().Format(time.RFC3339Nano),
+		StartAt:        familySourceTime(sample.Start),
+		EndAt:          familySourceTime(sample.End),
 		SourceRevision: unavailableFamilyFact("not_provided"), Operation: "upsert",
 	}
 	content.SourceTimeZone, content.SourceOffset = familyTimeFacts(sample.StartContext)

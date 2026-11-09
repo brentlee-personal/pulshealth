@@ -106,3 +106,23 @@ func TestIntegration_FamilyHealthConflictRollsBackSourceDelete(t *testing.T) {
 		t.Fatal("record conflict committed a partial source deletion")
 	}
 }
+func TestIntegration_FamilyHealthSubmicrosecondTimeIsNotADuplicate(t *testing.T) {
+	f := familyTestSetup(t)
+	actor := f.actors[0]
+	sample := f.uuid(0x7e0)
+	first := strings.Replace(f.body(f.uuid(0x7e1), sample, 62.5), `"start":1718000000000`, `"start":1718000000000.0002`, 1)
+	second := strings.Replace(f.body(f.uuid(0x7e2), sample, 62.5), `"start":1718000000000`, `"start":1718000000000.0005`, 1)
+	if status, _ := f.post(t, actor, first); status != http.StatusOK {
+		t.Fatalf("first status=%d", status)
+	}
+	if status, _ := f.post(t, actor, second); status != http.StatusConflict {
+		t.Fatalf("changed source instant status=%d, want 409", status)
+	}
+	var stamp string
+	if err := f.admin.QueryRow(f.ctx, "SELECT source_facts->>'start_at' FROM family_record_identity WHERE user_id=$1 AND source_record_id=$2", actor.user, sample).Scan(&stamp); err != nil {
+		t.Fatal(err)
+	}
+	if stamp != "2024-06-10T06:13:20.0000002Z" {
+		t.Fatal("index lost the original source time precision")
+	}
+}
