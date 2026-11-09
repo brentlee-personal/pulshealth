@@ -109,6 +109,8 @@ enum BatchSerializer {
     /// `clientVersion` defaults to the host app's version; tests pin it.
     static func ndjson(for batch: SyncBatch, clientVersion: String = PulsProtocol.clientVersion) throws -> Data {
         let encoder = JSONEncoder.puls
+        // Re-encoding one batch ID must retain its body digest across retries.
+        encoder.outputFormatting.insert(.sortedKeys)
         let newline = Data([0x0A])
         var out = Data()
         out.reserveCapacity(batch.samples.count * 220 + 256)

@@ -659,6 +659,10 @@ An identical batch retry returns the original transaction, timestamp and counts.
 A personal batch stored before this receipt format cannot be acknowledged by
 inventing a replacement receipt; the receiver returns 409.
 
+The updated SDK serializes object keys in sorted order. Re-encoding the same
+batch retains its exact NDJSON bytes, including the header and newline bytes;
+the receipt hash still covers the transmitted bytes, not a rewritten JSON form.
+
 The updated SDK checks the member, batch ID, exact decoded NDJSON SHA-256,
 generation, committed state, UTC timestamp and complete business-line counts
 before an upload succeeds. A malformed, missing or mismatched family receipt

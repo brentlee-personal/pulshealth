@@ -52,8 +52,11 @@ import Testing
             var receipt = fields(batch, ndjson: ndjson)
             receipt[key] = value
             let body = try JSONSerialization.data(withJSONObject: ["receipt": receipt])
-            await #expect(throws: TransportError.self) {
-                try await transport(body: body).upload(batch)
+            do {
+                _ = try await transport(body: body).upload(batch)
+                Issue.record("Invalid family response acknowledged an upload")
+            } catch TransportError.invalidAcknowledgement {
+                #expect(!TransportError.invalidAcknowledgement.isRetryable)
             }
         }
         var missing = fields(batch, ndjson: ndjson)
@@ -70,6 +73,14 @@ import Testing
                 #expect(!TransportError.invalidAcknowledgement.isRetryable)
                 #expect(TransportError.invalidAcknowledgement.startsCooldown)
             }
+        }
+    }
+
+    @Test func serializingSameBatchRetainsReplayBytes() throws {
+        let batch = batch
+        let original = try BatchSerializer.ndjson(for: batch)
+        for _ in 0..<20 {
+            #expect(try BatchSerializer.ndjson(for: batch) == original)
         }
     }
 
