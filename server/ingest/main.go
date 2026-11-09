@@ -354,7 +354,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	// can act on.
 	headerVersion, err := parseProtocolHeader(r.Header.Get("X-Puls-Protocol"))
 	if err != nil {
-		s.rejectProtocol(w, r, err, 0)
+		s.rejectProtocol(w, r, 0)
 		return
 	}
 
@@ -365,7 +365,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	// to the database is the last thing to add while it is the bottleneck.
 	if !s.acquireBatchSlot(r.Context()) {
 		s.log.Warn("batch refused: too many in flight",
-			"batch_id", headerBatchID, "max_inflight_batches", cap(s.batchSlots))
+			"batch_id", diagnosticUUID(headerBatchID), "max_inflight_batches", cap(s.batchSlots))
 		w.Header().Set("Retry-After", strconv.Itoa(batchRetryAfterSeconds))
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "too many batches in flight; retry shortly"})
 		return
@@ -378,16 +378,16 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	case "gzip":
 		gz, err := gzip.NewReader(cr)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid gzip body: " + err.Error()})
-			s.recordBatchRejection(r, http.StatusBadRequest, "gzip", "invalid gzip body: "+err.Error(), cr.n)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": batchRejectionMessage("gzip")})
+			s.recordBatchRejection(r, http.StatusBadRequest, "gzip", cr.n)
 			return
 		}
 		defer gz.Close()
 		body = gz
 	case "", "identity":
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported Content-Encoding: " + enc})
-		s.recordBatchRejection(r, http.StatusBadRequest, "encoding", "unsupported Content-Encoding: "+enc, cr.n)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": batchRejectionMessage("encoding")})
+		s.recordBatchRejection(r, http.StatusBadRequest, "encoding", cr.n)
 		return
 	}
 	decodedBody := http.MaxBytesReader(w, io.NopCloser(body), maxDecodedBody)
@@ -398,24 +398,24 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var pve *ProtocolVersionError
 		if errors.As(err, &pve) {
-			s.rejectProtocol(w, r, err, cr.n)
+			s.rejectProtocol(w, r, cr.n)
 			return
 		}
 		status := batchParseStatus(err)
 		s.log.Warn("batch rejected",
-			"batch_id", headerBatchID, "err", err.Error(), "bytes", cr.n)
-		writeJSON(w, status, map[string]string{"error": err.Error()})
-		s.recordBatchRejection(r, status, "parse", err.Error(), cr.n)
+			"batch_id", diagnosticUUID(headerBatchID), "stage", "parse", "status", status, "bytes", cr.n)
+		writeJSON(w, status, map[string]string{"error": batchRejectionMessage("parse")})
+		s.recordBatchRejection(r, status, "parse", cr.n)
 		return
 	}
 	protocol, err := reconcileProtocolVersions(headerVersion, batch.Header.SchemaVersion)
 	if err != nil {
-		s.rejectProtocol(w, r, err, cr.n)
+		s.rejectProtocol(w, r, cr.n)
 		return
 	}
 	if headerBatchID != "" && !strings.EqualFold(headerBatchID, batch.Header.BatchID) {
 		s.log.Warn("X-Batch-ID header does not match body batchID",
-			"header", headerBatchID, "body", batch.Header.BatchID)
+			"header", diagnosticUUID(headerBatchID), "body", batch.Header.BatchID)
 	}
 
 	// The auth middleware settled the user before the body was read: the
@@ -424,7 +424,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	// upserts the matching users row. The token id is recorded on the batch.
 	userID, ok := readUserID(w, r)
 	if !ok {
-		s.recordBatchRejection(r, http.StatusInternalServerError, "identity", "no authenticated user", cr.n)
+		s.recordBatchRejection(r, http.StatusInternalServerError, "identity", cr.n)
 		return
 	}
 	batch.Header.UserID = userID
@@ -437,7 +437,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	if wakeID := r.Header.Get("X-Wake-ID"); wakeID != "" {
 		if !isUUID(wakeID) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "X-Wake-ID is not a UUID"})
-			s.recordBatchRejection(r, http.StatusBadRequest, "wake", "X-Wake-ID is not a UUID", cr.n)
+			s.recordBatchRejection(r, http.StatusBadRequest, "wake", cr.n)
 			return
 		}
 		batch.Header.WakeID = wakeID
@@ -460,23 +460,19 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	insertDur := time.Since(insertStart)
 	if err != nil {
 		s.log.Error("batch insert failed",
-			"batch_id", batch.Header.BatchID, "type", batch.Header.Type, "err", err.Error())
+			"batch_id", batch.Header.BatchID, "stage", "insert")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "insert failed"})
-		s.recordBatchRejection(r, http.StatusInternalServerError, "insert", err.Error(), cr.n)
+		s.recordBatchRejection(r, http.StatusInternalServerError, "insert", cr.n)
 		return
 	}
 
 	s.log.Info("batch ingested",
 		"batch_id", batch.Header.BatchID,
-		"device_id", batch.Header.DeviceID,
 		"user_id", batch.Header.UserID,
 		"token_id", batch.Header.DeviceTokenID,
 		"wake_id", batch.Header.WakeID,
-		"trigger", batch.Header.Trigger,
+		"trigger", diagnosticTrigger(batch.Header.Trigger),
 		"protocol", protocol,
-		"client_version", batch.Header.ClientVersion,
-		"type", batch.Header.Type,
-		"reason", batch.Header.Reason,
 		"samples", len(batch.Samples),
 		"deletions", len(batch.Deletions),
 		"routes", len(batch.Routes),
@@ -521,43 +517,75 @@ func (s *Server) acquireBatchSlot(ctx context.Context) bool {
 }
 
 // rejectProtocol answers an unsupported or contradictory protocol version with
-// the fixed negotiation body. The descriptive error goes to the log and
-// ingest_rejections (stage "protocol"), not to the client.
-func (s *Server) rejectProtocol(w http.ResponseWriter, r *http.Request, err error, bodyBytes int64) {
+// the fixed negotiation body. Raw version text never enters diagnostics.
+func (s *Server) rejectProtocol(w http.ResponseWriter, r *http.Request, bodyBytes int64) {
 	s.log.Warn("batch rejected",
-		"batch_id", r.Header.Get("X-Batch-ID"), "err", err.Error(), "bytes", bodyBytes)
+		"batch_id", diagnosticUUID(r.Header.Get("X-Batch-ID")), "stage", "protocol", "bytes", bodyBytes)
 	writeJSON(w, http.StatusBadRequest, protocolRejection{
 		Error:             "unsupported protocol version",
 		SupportedVersions: supportedProtocolVersions,
 	})
-	s.recordBatchRejection(r, http.StatusBadRequest, "protocol", err.Error(), bodyBytes)
+	s.recordBatchRejection(r, http.StatusBadRequest, "protocol", bodyBytes)
+}
+
+func batchRejectionMessage(stage string) string {
+	switch stage {
+	case "identity":
+		return "invalid upload identity"
+	case "gzip":
+		return "invalid gzip body"
+	case "encoding":
+		return "unsupported Content-Encoding"
+	case "parse":
+		return "invalid batch"
+	case "wake":
+		return "invalid wake identifier"
+	case "insert":
+		return "insert failed"
+	case "protocol":
+		return "unsupported protocol version"
+	default:
+		return "batch rejected"
+	}
+}
+
+func diagnosticUUID(value string) string {
+	if isUUID(value) {
+		return value
+	}
+	return ""
+}
+
+func diagnosticTrigger(value string) string {
+	switch value {
+	case "observer", "backgroundProcessing", "backgroundContinued", "foreground", "manual":
+		return value
+	}
+	return ""
 }
 
 // recordBatchRejection is intentionally best-effort: observability must never
 // replace or delay the original response. Use a short context independent of
 // the request because truncated uploads commonly arrive with a canceled client.
-func (s *Server) recordBatchRejection(r *http.Request, status int, stage, message string, bodyBytes int64) {
-	const maxFieldLength = 2_000
-	trim := func(value string) string {
-		if len(value) > maxFieldLength {
-			return value[:maxFieldLength]
-		}
-		return value
+func (s *Server) recordBatchRejection(r *http.Request, status int, stage string, bodyBytes int64) {
+	p, ok := principalFrom(r.Context())
+	if !ok || !isUUID(p.userID) {
+		return
 	}
-	userID := r.Header.Get("X-User-ID")
-	if p, ok := principalFrom(r.Context()); ok {
-		userID = p.userID
+	encoding := r.Header.Get("Content-Encoding")
+	if encoding != "gzip" && encoding != "identity" {
+		encoding = ""
 	}
 	rejection := IngestRejection{
-		BatchID:         trim(r.Header.Get("X-Batch-ID")),
-		UserID:          trim(userID),
-		WakeID:          trim(r.Header.Get("X-Wake-ID")),
-		Trigger:         trim(r.Header.Get("X-Wake-Trigger")),
+		BatchID:         diagnosticUUID(r.Header.Get("X-Batch-ID")),
+		UserID:          p.userID,
+		WakeID:          diagnosticUUID(r.Header.Get("X-Wake-ID")),
+		Trigger:         diagnosticTrigger(r.Header.Get("X-Wake-Trigger")),
 		Status:          status,
-		Stage:           trim(stage),
-		ErrorMessage:    trim(message),
+		Stage:           stage,
+		ErrorMessage:    batchRejectionMessage(stage),
 		Bytes:           bodyBytes,
-		ContentEncoding: trim(r.Header.Get("Content-Encoding")),
+		ContentEncoding: encoding,
 	}
 	// Called only after the response has been written: with the database
 	// down this blocks on pool acquire for the full 2 s, and a retrying client
@@ -566,7 +594,7 @@ func (s *Server) recordBatchRejection(r *http.Request, status int, stage, messag
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := s.store.RecordRejection(ctx, rejection); err != nil {
-		s.log.Error("could not persist batch rejection", "err", err.Error(), "stage", stage)
+		s.log.Error("could not persist batch rejection", "stage", stage)
 	}
 }
 

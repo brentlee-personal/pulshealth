@@ -112,7 +112,12 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 		p, rej := s.authenticate(r.Context(), r.Header.Get("Authorization"))
 		if rej == nil {
-			p.userID, rej = s.resolveUser(p, r)
+			var userID string
+			userID, rej = s.resolveUser(p, r)
+			if rej == nil {
+				p.userID = userID
+			}
+			r = r.WithContext(withPrincipal(r.Context(), p))
 		}
 		if rej != nil {
 			if rej.charge {
@@ -123,11 +128,11 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			// own rejection record does not exist; keep the durable log honest.
 			if rej.status != http.StatusUnauthorized && rej.status != http.StatusServiceUnavailable &&
 				r.Method == http.MethodPost && r.URL.Path == "/v1/batches" {
-				s.recordBatchRejection(r, rej.status, "identity", rej.body, 0)
+				s.recordBatchRejection(r, rej.status, "identity", 0)
 			}
 			return
 		}
-		next(w, r.WithContext(withPrincipal(r.Context(), p)))
+		next(w, r)
 	}
 }
 

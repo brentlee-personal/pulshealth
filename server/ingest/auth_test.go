@@ -270,6 +270,9 @@ func TestBatchUserMismatchIsRecordedAsRejection(t *testing.T) {
 	if len(fs.rejections) != 1 || fs.rejections[0].Stage != "identity" || fs.rejections[0].Status != http.StatusForbidden {
 		t.Fatalf("rejections = %+v, want one identity/403 row", fs.rejections)
 	}
+	if fs.rejections[0].UserID != deviceUser {
+		t.Errorf("rejection owner = %q, want authenticated user %q", fs.rejections[0].UserID, deviceUser)
+	}
 	// Reads are refused the same way but leave no batch-rejection row.
 	fs.rejections = nil
 	if code, _ := authAttempt(t, srv, activeTok, devicePeer, map[string]string{"X-User-ID": otherUser}); code != http.StatusForbidden {

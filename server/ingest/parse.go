@@ -359,7 +359,7 @@ var supportedProtocolVersions = []int{ProtocolVersion}
 // ProtocolVersionError marks a request whose declared wire-format version this
 // server does not speak. It is a client-side failure like ParseError (400),
 // but the handler answers it with the fixed negotiation body rather than the
-// error text; the text goes to ingest_rejections and the log.
+// error text; raw error text stays internal to the parser.
 type ProtocolVersionError struct {
 	// Source names where the version came from: the "schemaVersion" header
 	// field or the "X-Puls-Protocol" request header.

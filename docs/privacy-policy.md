@@ -461,7 +461,9 @@ opens the form), or the developer invites you. What happens to your data:
   by foreground use, a manual action or background delivery. Wake identifiers
   correlate related uploads; the server also records processing timings.
   Authenticated uploads that fail retain status, failure stage and a bounded
-  diagnostic message, without the health-data request body, for 90 days.
+  fixed diagnostic category, without raw parser/database errors or arbitrary
+  client labels, for 90 days. Rejections belong to the verified credential's
+  user; a conflicting client user header cannot change that owner.
   These records diagnose missing or delayed sync and support the service;
   they are not used for advertising or audience analytics. Deleting your
   account removes its upload and rejection records too.
@@ -588,7 +590,10 @@ opens the form), or the developer invites you. What happens to your data:
 - **Operational logs.** Server security and operational logs can include network
   addresses, user/device/token and batch identifiers, health type names, counts,
   status codes and timings (not complete health-data request bodies). They are
-  restricted to the operator and used for security and troubleshooting, not
+  not a place for raw batch parser errors or arbitrary client labels: the
+  ingest batch logger retains validated correlation identifiers and fixed
+  failure categories instead. Logs are restricted to the operator and used
+  for security and troubleshooting, not
   advertising. They are separate from the account database: account deletion
   does not selectively rewrite historical log files. Container logs rotate by
   size (up to five 50 MB files per service), rather than on a fixed age schedule.

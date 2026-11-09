@@ -403,6 +403,14 @@ The reference sync ingest endpoint is not a request ZIP receiver. See
 
 The [hosted operations runbook](docs/hosted-operations.md) defines operator access, deletion escalation, backup expiry, restore-ledger checks and incident handling. The hosted service is not end-to-end encrypted; database administrators remain trusted. Per-account views protect viewer access, not against a compromised application or operator. Late diagnostic writes hold the user lock and require an existing owner, so they cannot recreate account diagnostics after erasure.
 
+Batch rejection diagnostics use the authenticated credential's owner, even when
+a conflicting `X-User-ID` is refused. HTTP failures, batch logs and durable
+rejection records use fixed failure categories rather than raw parser/database
+errors. Correlation identifiers are UUID-validated; diagnostic wake triggers
+and encodings are allowlisted. Arbitrary batch labels stay out of the batch
+logger. This does not sanitize historical log files or previously saved
+diagnostics, and does not change the health records stored by a valid upload.
+
 ## Optional iPhone account access
 
 Settings → User signs in independently of Health sync. A same-origin protected

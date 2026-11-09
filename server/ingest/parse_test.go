@@ -1574,14 +1574,13 @@ func TestHandleBatch_UnsupportedProtocolVersion(t *testing.T) {
 		name       string
 		body       string
 		header     string // X-Puls-Protocol; "" omits it
-		wantMsg    string // substring of the recorded rejection message
 		bodyUnread bool   // rejected on the request header alone
 	}{
-		{"schemaVersion 2 in body", versioned(t, "2", hrSample), "", "schemaVersion 2", false},
-		{"X-Puls-Protocol 2", ndjson(t, 1, 0, hrSample), "2", "X-Puls-Protocol 2", true},
-		{"body 1 header 2", versioned(t, "1", hrSample), "2", "X-Puls-Protocol 2", true},
-		{"body 2 header 1", versioned(t, "2", hrSample), "1", "schemaVersion 2", false},
-		{"header not an integer", ndjson(t, 1, 0, hrSample), "1.0", `X-Puls-Protocol "1.0"`, true},
+		{"schemaVersion 2 in body", versioned(t, "2", hrSample), "", false},
+		{"X-Puls-Protocol 2", ndjson(t, 1, 0, hrSample), "2", true},
+		{"body 1 header 2", versioned(t, "1", hrSample), "2", true},
+		{"body 2 header 1", versioned(t, "2", hrSample), "1", false},
+		{"header not an integer", ndjson(t, 1, 0, hrSample), "1.0", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1610,8 +1609,8 @@ func TestHandleBatch_UnsupportedProtocolVersion(t *testing.T) {
 			if rej.Stage != "protocol" || rej.Status != http.StatusBadRequest {
 				t.Errorf("rejection = %+v, want stage protocol / 400", rej)
 			}
-			if !strings.Contains(rej.ErrorMessage, tc.wantMsg) {
-				t.Errorf("rejection message = %q, want it to mention %q", rej.ErrorMessage, tc.wantMsg)
+			if rej.ErrorMessage != "unsupported protocol version" {
+				t.Errorf("rejection message = %q, want the fixed protocol category", rej.ErrorMessage)
 			}
 			if tc.bodyUnread && rej.Bytes != 0 {
 				t.Errorf("rejection bytes = %d, want 0: the body must not be read when the request header is refused", rej.Bytes)
