@@ -55,6 +55,7 @@ func familyTestSetup(t *testing.T) *familyTestFixture {
 		defer stop()
 		users := []string{f.actors[0].user, f.actors[1].user}
 		for _, table := range []string{
+			"family_record_identity",
 			"workout_route_points", "workout_series_points", "quantity_samples", "category_samples",
 			"heartbeat_series", "ecg_samples", "state_of_mind", "medication_dose_events",
 			"aggregate_samples", "activity_summaries", "workouts", "batches", "device_tokens", "users",

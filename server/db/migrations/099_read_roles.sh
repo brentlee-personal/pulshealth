@@ -167,6 +167,9 @@ BEGIN
   IF to_regclass('public.family_batch_receipts') IS NOT NULL THEN
     REVOKE ALL ON TABLE family_batch_receipts FROM grafana;
   END IF;
+  IF to_regclass('public.family_record_identity') IS NOT NULL THEN
+    REVOKE ALL ON TABLE family_record_identity FROM grafana;
+  END IF;
   IF to_regclass('public.family_source_connections') IS NOT NULL THEN
     REVOKE ALL ON TABLE family_source_connections FROM grafana;
     REVOKE ALL ON TABLE family_device_generations FROM grafana;
@@ -545,6 +548,7 @@ FROM (VALUES
   -- and Stats' last-batch times.
   ('batches',                ARRAY['SELECT', 'INSERT', 'UPDATE']),
   ('family_batch_receipts',  ARRAY['SELECT', 'INSERT', 'UPDATE']),
+  ('family_record_identity', ARRAY['SELECT', 'INSERT']),
   ('family_source_connections', ARRAY['SELECT', 'INSERT']),
   ('family_device_generations', ARRAY['SELECT', 'INSERT']),
   -- RecordRejection: a plain INSERT, never read back.

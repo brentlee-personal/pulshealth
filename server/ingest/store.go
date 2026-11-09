@@ -219,6 +219,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	userID := b.Header.UserID
 	var generation int64
 	var sourceConnectionID *string
+	var credentialID string
 	if userID == "" {
 		userID = defaultUserID
 	}
@@ -232,9 +233,9 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 			return res, fmt.Errorf("lock authenticated user: %w", err)
 		}
 		var tokenID int64
-		if err := tx.QueryRow(ctx, `SELECT id, device_generation, source_connection_id::text FROM device_tokens
+		if err := tx.QueryRow(ctx, `SELECT id, device_generation, source_connection_id::text, credential_id::text FROM device_tokens
 			WHERE id = $1 AND user_id = $2 AND status = 'active' FOR SHARE`,
-			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation, &sourceConnectionID); err != nil {
+			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation, &sourceConnectionID, &credentialID); err != nil {
 			return res, fmt.Errorf("revalidate device token: %w", err)
 		}
 		if sourceConnectionID == nil {
@@ -305,6 +306,11 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	}
 
 	insertStart := time.Now()
+	if sourceConnectionID != nil {
+		if err := claimFamilySamples(ctx, tx, b, userID, *sourceConnectionID, credentialID); err != nil {
+			return res, err
+		}
+	}
 
 	typeIDs, err := ensureTypes(ctx, tx, b)
 	if err != nil {

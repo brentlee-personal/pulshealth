@@ -71,14 +71,14 @@ Save & Apply; signing in alone uploads no Health data.
 - **You choose what is read.** Nothing is read until you pick the data types
   and iOS grants permission, and you can change or revoke that at any time.
 
-## PulsHealth Pro purchases
-
 The family-health fork's self-hosted receiver validates uploaded JSON locally
 with JCS and JSON Schema libraries. Its schemas and type catalog are embedded
 in the receiver. Validation sends no health data or schema requests to library
 maintainers or external services. Rejections keep diagnostic metadata, not
 the uploaded health-data body. These server libraries do not add dependencies
 or permissions to the iPhone app.
+
+## PulsHealth Pro purchases
 
 
 The app offers optional monthly or yearly auto-renewing PulsHealth Pro

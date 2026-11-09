@@ -466,6 +466,11 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.InsertBatch(insertCtx, batch, cr.n)
 	insertDur := time.Since(insertStart)
 	if err != nil {
+		if errors.Is(err, errRecordConflict) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "record identity conflicts with source history"})
+			s.recordBatchRejection(r, http.StatusConflict, "conflict", cr.n)
+			return
+		}
 		if errors.Is(err, errSourceBinding) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "source connection requires verified pairing"})
 			s.recordBatchRejection(r, http.StatusConflict, "conflict", cr.n)

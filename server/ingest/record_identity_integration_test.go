@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestIntegration_FamilyHealthRecordConflictRollsBackWholeBatch(t *testing.T) {
@@ -51,7 +54,7 @@ func TestIntegration_FamilyHealthConflictingRecordsInsideOneBatch(t *testing.T) 
 	if status, _ := f.post(t, f.actors[0], body); status != http.StatusConflict {
 		t.Errorf("conflicting records inside one batch status=%d, want 409", status)
 	}
-	for _, table := range []string{"quantity_samples", "batches", "family_batch_receipts"} {
+	for _, table := range []string{"quantity_samples", "batches", "family_batch_receipts", "family_record_identity"} {
 		var count int
 		if err := f.admin.QueryRow(f.ctx, "SELECT count(*) FROM "+table+" WHERE user_id=$1", f.actors[0].user).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -163,5 +166,45 @@ func TestIntegration_FamilyHealthRequiredWorkoutFields(t *testing.T) {
 				t.Errorf("required source field status=%d, want %d", status, tc.status)
 			}
 		})
+	}
+}
+
+func TestIntegration_FamilyHealthRecordIndexPreservesFacts(t *testing.T) {
+	f := familyTestSetup(t)
+	actor := f.actors[0]
+	rawID := strings.ToUpper(f.uuid(0x7a0))
+	if status, _ := f.post(t, actor, f.body(f.uuid(0x7a1), rawID, 62.5)); status != http.StatusOK {
+		t.Fatalf("initial status=%d", status)
+	}
+	plain, _, err := f.store.IssueDeviceToken(f.ctx, actor.user, "synthetic re-pair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := f.post(t, familyTestActor{user: actor.user, token: plain}, f.body(f.uuid(0x7a2), strings.ToLower(rawID), 62.5)); status != http.StatusOK || string(body["duplicates"]) != "1" {
+		t.Fatalf("same source re-pair status=%d, duplicates=%s", status, body["duplicates"])
+	}
+	var canonical, original, revision string
+	var digestBytes, records int
+	var noValue bool
+	if err := f.admin.QueryRow(f.ctx, `SELECT source_record_id,raw_source_record_id,
+		octet_length(payload_digest),source_facts->'source_revision'->>'status',
+		NOT (source_facts ? 'value' OR source_facts ? 'original_value'),
+		(SELECT count(*) FROM family_record_identity WHERE user_id=$1)
+		FROM family_record_identity WHERE user_id=$1`, actor.user).
+		Scan(&canonical, &original, &digestBytes, &revision, &noValue, &records); err != nil {
+		t.Fatal(err)
+	}
+	if canonical != strings.ToLower(rawID) || original != rawID || digestBytes != 32 || revision != "unavailable" || !noValue || records != 1 {
+		t.Fatal("record identity or source facts changed across re-pairing")
+	}
+	for _, query := range []string{
+		"UPDATE family_record_identity SET payload_digest=sha256('rewritten') WHERE user_id=$1",
+		"DELETE FROM family_record_identity WHERE user_id=$1",
+	} {
+		_, err := f.store.pool.Exec(f.ctx, query, actor.user)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("index mutation permission=%v, want denied", err)
+		}
 	}
 }
