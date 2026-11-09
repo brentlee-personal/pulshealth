@@ -119,6 +119,9 @@ func TestIntegration_IngestRoleGrants(t *testing.T) {
 		`SELECT 1 FROM category_labels LIMIT 1`,
 		`SELECT 1 FROM metric_daily LIMIT 1`,
 		`UPDATE quantity_samples SET value = value WHERE false`,
+		`UPDATE family_source_connections SET status = status WHERE false`,
+		`UPDATE family_device_generations SET device_generation = device_generation WHERE false`,
+		`SELECT bind_personal_device_source()`,
 		`TRUNCATE batches`,
 		`CREATE TABLE public.ingest_must_not_create (x int)`,
 	} {

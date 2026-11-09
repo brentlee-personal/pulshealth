@@ -738,12 +738,26 @@ BEGIN
   END IF;
 
   IF EXISTS (
+    WITH expected AS (
+      SELECT to_regprocedure('public.family_apple_source_active(uuid,uuid)')::oid AS oid,
+             'EXECUTE'::text AS privilege_type, false AS is_grantable
+      WHERE to_regprocedure('public.family_apple_source_active(uuid,uuid)') IS NOT NULL
+    ), actual AS (
+      SELECT p.oid, acl.privilege_type, acl.is_grantable
+      FROM pg_proc p
+      CROSS JOIN LATERAL aclexplode(p.proacl) acl
+      WHERE acl.grantee = ingest_oid
+    )
+    (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+    UNION ALL
+    (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+  ) THEN
+    RAISE EXCEPTION 'ingest function ACL set is not exact';
+  END IF;
+
+  IF EXISTS (
     SELECT 1 FROM pg_attribute a
     CROSS JOIN LATERAL aclexplode(a.attacl) acl
-    WHERE acl.grantee = ingest_oid
-  ) OR EXISTS (
-    SELECT 1 FROM pg_proc p
-    CROSS JOIN LATERAL aclexplode(p.proacl) acl
     WHERE acl.grantee = ingest_oid
   ) OR EXISTS (
     SELECT 1 FROM pg_type t
@@ -761,7 +775,7 @@ BEGIN
     CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
     WHERE acl.grantee = ingest_oid
   ) THEN
-    RAISE EXCEPTION 'ingest has unexpected column, function, type, parameter, or default ACLs';
+    RAISE EXCEPTION 'ingest has unexpected column, type, parameter, or default ACLs';
   END IF;
 END
 $$;

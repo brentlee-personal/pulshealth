@@ -111,3 +111,26 @@ func TestIntegration_FamilyHealthRevokedSourceCannotWrite(t *testing.T) {
 		t.Fatal("revoked source left a committed batch")
 	}
 }
+
+func TestIntegration_FamilyHealthSourceLockDoesNotGrantOtherMembers(t *testing.T) {
+	f := familyTestSetup(t)
+	source, _ := familyDeviceBinding(t, f, f.actors[0])
+	for i, actor := range f.actors {
+		var allowed bool
+		if err := f.store.pool.QueryRow(f.ctx, "SELECT family_apple_source_active($1,$2)", actor.user, source).Scan(&allowed); err != nil {
+			t.Fatal(err)
+		}
+		if allowed != (i == 0) {
+			t.Fatal("source lock helper expanded source ownership")
+		}
+	}
+	for _, role := range []string{"api_reader", "web_app", "grafana"} {
+		var allowed bool
+		if err := f.admin.QueryRow(f.ctx, "SELECT has_function_privilege($1, 'family_apple_source_active(uuid,uuid)', 'EXECUTE')", role).Scan(&allowed); err != nil {
+			t.Fatal(err)
+		}
+		if allowed {
+			t.Errorf("source locking function unexpectedly executable by %s", role)
+		}
+	}
+}
