@@ -1597,9 +1597,7 @@ func TestIntegration_InsertIntoCompressedChunk(t *testing.T) {
 	if res := insert(id(0x102), page...); res.Accepted != 0 || res.Duplicates != 3 {
 		t.Fatalf("re-sent page: accepted %d, duplicates %d; want 0 and 3", res.Accepted, res.Duplicates)
 	}
-	if res := insert(id(0x101), page...); !res.DuplicateBatch || res.Accepted != 0 {
-		t.Fatalf("re-sent batch: %+v, want a duplicate batch accepting nothing", res)
-	}
+	assertStoredBatchReplay(t, res, insert(id(0x101), page...))
 
 	var rows int
 	var dupValue float64
