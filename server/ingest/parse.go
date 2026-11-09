@@ -20,8 +20,8 @@ import (
 type BatchHeader struct {
 	BatchID  string `json:"batchID"`
 	DeviceID string `json:"deviceID"`
-	// UserID is not sent in the body: the handler fills it from the X-User-ID
-	// request header (defaulting to the default user) before InsertBatch runs.
+	// UserID is not sent in the body: the handler fills it from the verified
+	// principal before InsertBatch runs. Shared-token mode retains legacy scoping.
 	UserID string `json:"-"`
 	// DeviceTokenID is the device_tokens row the request authenticated with,
 	// filled by the handler from the auth principal; 0 for the shared token.
@@ -49,7 +49,7 @@ type BatchHeader struct {
 	// before a single data line is read.
 	SchemaVersion *int `json:"schemaVersion"`
 	// ClientVersion is free text identifying the sender, e.g. "0.1.0 (1)".
-	// Optional; logged per batch, never stored.
+	// Optional client metadata; never stored or copied to operational batch logs.
 	ClientVersion string `json:"clientVersion"`
 	// Optional current device zone; used only to initialize new hosted accounts.
 	TimeZoneID string `json:"timeZoneID"`

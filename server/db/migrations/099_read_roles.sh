@@ -534,7 +534,7 @@ FROM (VALUES
   ('workout_series_points',  ARRAY['SELECT', 'INSERT', 'DELETE']),
   -- Tombstones for deleted samples.
   ('deleted_samples',        ARRAY['SELECT', 'INSERT']),
-  -- The batch reservation (ON CONFLICT (batch_id) DO NOTHING), its insert_ms,
+  -- The member-scoped batch reservation, its insert_ms,
   -- and Stats' last-batch times.
   ('batches',                ARRAY['SELECT', 'INSERT', 'UPDATE']),
   -- RecordRejection: a plain INSERT, never read back.

@@ -214,7 +214,7 @@ energy, HRV, distance, VO2 max, respiratory rate, and other
 
 Grain: one row per HealthKit quantity sample, per user.
 
-Primary key: `(uuid, start_ts)`.
+Primary key: `(user_id, uuid, start_ts)`.
 
 TimescaleDB: hypertable on `start_ts`, one-month chunks, old chunks compressed
 with columnstore.
@@ -264,7 +264,7 @@ symptoms, mindful sessions, stand hours, menstrual flow, and other
 
 Grain: one row per HealthKit category sample, per user.
 
-Primary key: `uuid`.
+Primary key: `(user_id, uuid)`.
 
 Important columns:
 
@@ -311,7 +311,7 @@ details.
 
 Grain: one row per workout UUID, per user.
 
-Primary key: `uuid`.
+Primary key: `(user_id, uuid)`.
 
 Important columns:
 
@@ -355,7 +355,7 @@ What it stores: GPS route points from `HKWorkoutRoute`.
 
 Grain: one point per workout timestamp.
 
-Primary key: `(workout_uuid, ts)`.
+Primary key: `(user_id, workout_uuid, ts)`.
 
 TimescaleDB: hypertable on `ts`.
 
@@ -380,7 +380,7 @@ power, speed, or cadence.
 
 Grain: one point per `(workout_uuid, type_id, ts)`.
 
-Primary key: `(workout_uuid, type_id, ts)`.
+Primary key: `(user_id, workout_uuid, type_id, ts)`.
 
 TimescaleDB: hypertable on `ts`, compressed by workout for older chunks.
 
@@ -573,9 +573,17 @@ What it stores: one row per upload batch received by the ingest server. This is
 operational data, but it is essential for understanding whether the health data
 is current.
 
-Grain: one row per batch UUID.
+Grain: one row per member and client batch UUID.
 
-Primary key: `batch_id`.
+Primary key: `(user_id, batch_id)`.
+
+Migration 032 also scopes heartbeat, ECG, State of Mind, medication and deletion
+identities by `user_id`. Raw UUIDs are source identifiers, not authorization.
+It refuses batches without a known owner, temporarily decompresses affected
+columnstore chunks, and restores their compression in the same migration
+transaction. Keep a scoped snapshot and stop this project's writers before an
+upgrade; an error rolls back the migration. This member-key migration alone
+does not implement source-connection identities or durable digest receipts.
 
 Important columns:
 

@@ -56,7 +56,8 @@ func TestIntegrationReadsAreScopedByUser(t *testing.T) {
 	}
 	for i := range users {
 		u := &users[i]
-		u.sampleUUID = fixtureUUID("aaaa1111", suffix, i)
+		// Identical raw IDs must not make the database or a read choose the other owner.
+		u.sampleUUID = fixtureUUID("aaaa1111", suffix, 0)
 		u.workoutUUID = fixtureUUID("aaaa2222", suffix, i)
 		if _, err := admin.Exec(ctx, `INSERT INTO users (id, name) VALUES ($1, $2)`, u.userID, u.name); err != nil {
 			t.Fatalf("insert user %d: %v", i, err)
@@ -81,7 +82,7 @@ func TestIntegrationReadsAreScopedByUser(t *testing.T) {
 			if _, err := admin.Exec(ctx, `
 				INSERT INTO batches (batch_id, device_id, user_id, type_identifier, reason, sample_count, received_at)
 				VALUES ($1, 'scope-test', $2, $3, 'manual', $4, $5)`,
-				fixtureUUID(fmt.Sprintf("aaaa33%02d", i), suffix, int(b)), u.userID, identifier,
+				fixtureUUID("aaaa3300", suffix, int(b)), u.userID, identifier,
 				u.samples/u.batches, at.Add(time.Duration(b)*time.Minute)); err != nil {
 				t.Fatalf("insert batch %d/%d: %v", i, b, err)
 			}
@@ -93,7 +94,7 @@ func TestIntegrationReadsAreScopedByUser(t *testing.T) {
 			_, _ = admin.Exec(bg, `DELETE FROM batches WHERE user_id = $1`, u.userID)
 			_, _ = admin.Exec(bg, `DELETE FROM workouts WHERE user_id = $1 AND uuid = $2`, u.userID, u.workoutUUID)
 			_, _ = admin.Exec(bg, `DELETE FROM activity_summaries WHERE user_id = $1`, u.userID)
-			_, _ = admin.Exec(bg, `DELETE FROM quantity_samples WHERE uuid = $1 AND type_id = $2 AND start_ts >= $3`, u.sampleUUID, typeID, at)
+			_, _ = admin.Exec(bg, `DELETE FROM quantity_samples WHERE uuid = $1 AND type_id = $2 AND start_ts >= $3 AND user_id=$4`, u.sampleUUID, typeID, at, u.userID)
 			_, _ = admin.Exec(bg, `DELETE FROM users WHERE id = $1`, u.userID)
 		}
 	}()

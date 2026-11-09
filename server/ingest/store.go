@@ -249,7 +249,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 		                     activity_summary_count, bytes, exported_at,
 		                     wake_id, trigger, parse_ms, insert_ms, device_token_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, $15)
-		ON CONFLICT (batch_id) DO NOTHING`,
+		ON CONFLICT (user_id, batch_id) DO NOTHING`,
 		b.Header.BatchID, b.Header.DeviceID, userID, b.Header.Type, b.Header.Reason,
 		b.Header.SampleCount, b.Header.DeletionCount, b.Header.AggregateCount,
 		b.Header.ActivitySummaryCount, bodyBytes,
@@ -394,8 +394,8 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	// reservation and commit are intentionally excluded. parse_ms is measured in
 	// the handler and was stored on the reserved row.
 	insertMs := time.Since(insertStart).Milliseconds()
-	_, err = tx.Exec(ctx, `UPDATE batches SET insert_ms = $2 WHERE batch_id = $1`,
-		b.Header.BatchID, insertMs)
+	_, err = tx.Exec(ctx, `UPDATE batches SET insert_ms = $2 WHERE batch_id = $1 AND user_id = $3`,
+		b.Header.BatchID, insertMs, userID)
 	if err != nil {
 		return res, fmt.Errorf("update batch telemetry: %w", err)
 	}
@@ -2250,7 +2250,7 @@ func applyDeletions(ctx context.Context, tx pgx.Tx, dels []Deletion, userID stri
 		INSERT INTO deleted_samples (uuid, type_identifier, user_id)
 		SELECT x.uuid, x.type_identifier, $3::uuid
 		FROM unnest($1::uuid[], $2::text[]) AS x(uuid, type_identifier)
-		ON CONFLICT (uuid) DO NOTHING`,
+		ON CONFLICT (user_id, uuid) DO NOTHING`,
 		uuids, types, userID)
 	if err != nil {
 		return deleted, fmt.Errorf("record tombstones: %w", err)
