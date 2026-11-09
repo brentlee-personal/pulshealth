@@ -18,7 +18,7 @@ func TestParseBatch_SourceNumericRepresentation(t *testing.T) {
 		}
 	})
 	t.Run("ECG source precision", func(t *testing.T) {
-		line := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"HKElectrocardiogramTypeIdentifier","kind":"ecg","start":1718000000000,"end":1718000005000,"ecg":{"voltagesUV":[1.000000059604644775390624999999]}}`
+		line := `{"uuid":"11111111-1111-4111-8111-111111111111","type":"HKDataTypeIdentifierElectrocardiogram","kind":"ecg","start":1718000000000,"end":1718000005000,"ecg":{"voltagesUV":[1.000000059604644775390624999999]}}`
 		batch, err := ParseBatch(strings.NewReader(ndjson(t, 1, 0, line)))
 		if err != nil {
 			t.Fatal(err)

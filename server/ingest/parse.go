@@ -781,11 +781,11 @@ func scanUnmarshal(sc *bufio.Scanner, data []byte, v any) error {
 	if scanErr := sc.Err(); scanErr != nil {
 		return scanErr
 	}
-	canonical, err := jcs.Transform(data)
-	if err != nil {
+	if _, err := jcs.Transform(data); err != nil {
 		return err
 	}
-	return json.Unmarshal(canonical, v)
+	// Decode the source bytes so validation cannot double-round ECG float32 values.
+	return json.Unmarshal(data, v)
 }
 
 func validateSample(s *Sample) error {
