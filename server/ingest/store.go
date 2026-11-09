@@ -478,7 +478,7 @@ func (st *Store) Routes(ctx context.Context, userID string, filters RouteFilters
 			WHERE wsp.workout_uuid = w.uuid AND wsp.user_id = w.user_id
 		) metric_streams ON TRUE
 		%s
-		GROUP BY w.uuid, metric_streams.available_metrics
+		GROUP BY w.user_id, w.uuid, metric_streams.available_metrics
 		HAVING count(r.*) > 1
 		ORDER BY w.start_ts DESC
 		LIMIT %s
@@ -538,7 +538,7 @@ func (st *Store) Route(ctx context.Context, userID, uuid string) (*RouteDetail, 
 			WHERE wsp.workout_uuid = w.uuid AND wsp.user_id = w.user_id
 		) metric_streams ON TRUE
 		WHERE w.uuid = $1 AND w.user_id = $2
-		GROUP BY w.uuid, metric_streams.available_metrics
+		GROUP BY w.user_id, w.uuid, metric_streams.available_metrics
 		HAVING count(r.*) > 1`, uuid, userID)
 
 	var (
@@ -1585,10 +1585,10 @@ func metadataJSON(m map[string]any) (*string, error) {
 const quantityDuplicateTolerance = time.Millisecond
 
 // withoutStoredQuantity drops the quantity samples that are already stored —
-// same UUID, start within quantityDuplicateTolerance — and repeats of a UUID
+// same owner and UUID, start within quantityDuplicateTolerance — and repeats of a UUID
 // within the batch, so insertQuantity counts them as duplicates.
 //
-// quantity_samples' primary key is (uuid, start_ts), not uuid: it is a
+// quantity_samples' primary key is (user_id, uuid, start_ts), not uuid: it is a
 // hypertable partitioned on start_ts, and a unique index must include the
 // partitioning column. So ON CONFLICT only catches a re-send whose start lands
 // on the stored microsecond. Wire times are float epoch milliseconds, and two
@@ -1609,7 +1609,7 @@ const quantityDuplicateTolerance = time.Millisecond
 // Two concurrent batches carrying one sample a microsecond apart can still
 // both insert; the client never uploads the same type from two runs at once.
 func withoutStoredQuantity(ctx context.Context, tx pgx.Tx, samples []Sample,
-	typeIDs map[string]int16) ([]Sample, error) {
+	typeIDs map[string]int16, userID string) ([]Sample, error) {
 	if len(samples) == 0 {
 		return samples, nil
 	}
@@ -1641,8 +1641,8 @@ func withoutStoredQuantity(ctx context.Context, tx pgx.Tx, samples []Sample,
 	rows, err := tx.Query(ctx, `
 		SELECT uuid::text, start_ts FROM quantity_samples
 		WHERE uuid = ANY($1::uuid[]) AND type_id = ANY($2::smallint[])
-		  AND start_ts BETWEEN $3 AND $4`,
-		uuids, tids, lo.Add(-quantityDuplicateTolerance), hi.Add(quantityDuplicateTolerance))
+		  AND start_ts BETWEEN $3 AND $4 AND user_id = $5`,
+		uuids, tids, lo.Add(-quantityDuplicateTolerance), hi.Add(quantityDuplicateTolerance), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1680,7 +1680,7 @@ func withoutStoredQuantity(ctx context.Context, tx pgx.Tx, samples []Sample,
 func insertQuantity(ctx context.Context, tx pgx.Tx, samples []Sample,
 	typeIDs map[string]int16, sourceIDs map[sourceKey]int16,
 	temporalContextIDs map[temporalContextKey]int32, userID string) (int64, error) {
-	samples, err := withoutStoredQuantity(ctx, tx, samples, typeIDs)
+	samples, err := withoutStoredQuantity(ctx, tx, samples, typeIDs, userID)
 	if err != nil {
 		return 0, fmt.Errorf("near-duplicate guard: %w", err)
 	}
