@@ -573,9 +573,9 @@ What it stores: one row per upload batch received by the ingest server. This is
 operational data, but it is essential for understanding whether the health data
 is current.
 
-Grain: one row per member and client batch UUID.
+Grain: one row per member, server-assigned device generation and client batch UUID.
 
-Primary key: `(user_id, batch_id)`.
+Primary key: `(user_id, device_generation, batch_id)`.
 
 Migration 032 also scopes heartbeat, ECG, State of Mind, medication and deletion
 identities by `user_id`. Raw UUIDs are source identifiers, not authorization.
@@ -583,7 +583,14 @@ It refuses batches without a known owner, temporarily decompresses affected
 columnstore chunks, and restores their compression in the same migration
 transaction. Keep a scoped snapshot and stop this project's writers before an
 upgrade; an error rolls back the migration. This member-key migration alone
-does not implement source-connection identities or durable digest receipts.
+does not implement source-connection identities. Migration 033 adds private
+`family_batch_receipts`: the decompressed-body SHA-256, original count result,
+logical transaction UUID and transaction-final commit-record time. The result
+and metadata become visible only after the real transaction commits; the
+timestamp is not a claim about a PostgreSQL WAL commit timestamp. Deferred
+constraints prevent an incomplete reservation from committing. Device generation
+is trusted server enrollment state; zero is reserved for the existing legacy
+shared-token mode, never a personal credential.
 
 Important columns:
 

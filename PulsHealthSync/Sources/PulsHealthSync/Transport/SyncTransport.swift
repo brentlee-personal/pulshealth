@@ -23,6 +23,7 @@ public struct UploadResult: Sendable {
 /// optional and unknown fields are ignored, so a receiver that reports only
 /// some counts — or none — still decodes; the reference server returns all of
 /// them. Informational only: nothing here decides whether an anchor advances.
+/// An identical reference-server batch retry repeats its original counts.
 public struct IngestReceipt: Sendable, Equatable, Decodable {
     /// Sample lines that created a row.
     public var accepted: Int?

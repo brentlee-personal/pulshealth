@@ -36,6 +36,7 @@ var ingestGrants = map[string]string{
 	"workout_series_points":  "DELETE INSERT SELECT",
 	"deleted_samples":        "INSERT SELECT",
 	"batches":                "INSERT UPDATE SELECT",
+	"family_batch_receipts":  "INSERT UPDATE SELECT",
 	"ingest_rejections":      "INSERT",
 	"device_tokens":          "INSERT UPDATE SELECT",
 }

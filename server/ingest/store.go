@@ -32,6 +32,7 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // IngestResult mirrors the wire response.
 type IngestResult struct {
+	receipt           *committedBatchReceipt
 	Accepted          int64 `json:"accepted"`
 	Deleted           int64 `json:"deleted"`
 	Duplicates        int64 `json:"duplicates"`
@@ -211,6 +212,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	// on this insert; after the first transaction commits they observe the
 	// conflict and exit without replaying upserts, deletions, or profile changes.
 	userID := b.Header.UserID
+	var generation int64
 	if userID == "" {
 		userID = defaultUserID
 	}
@@ -224,14 +226,24 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 			return res, fmt.Errorf("lock authenticated user: %w", err)
 		}
 		var tokenID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM device_tokens
+		if err := tx.QueryRow(ctx, `SELECT id, device_generation FROM device_tokens
 			WHERE id = $1 AND user_id = $2 AND status = 'active' FOR SHARE`,
-			b.Header.DeviceTokenID, userID).Scan(&tokenID); err != nil {
+			b.Header.DeviceTokenID, userID).Scan(&tokenID, &generation); err != nil {
 			return res, fmt.Errorf("revalidate device token: %w", err)
 		}
 	} else if err := ensureUser(ctx, tx, userID); err != nil {
 		// Self-hosted shared tokens retain their legacy create-on-first-upload behavior.
 		return res, fmt.Errorf("ensure user: %w", err)
+	}
+	cached, err := reserveBatchReceipt(ctx, tx, b, userID, generation)
+	if err != nil {
+		return res, err
+	}
+	if cached != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return res, fmt.Errorf("commit replay: %w", err)
+		}
+		return *cached, nil
 	}
 	var wakeID, trigger, deviceTokenID any
 	if b.Header.WakeID != "" {
@@ -247,23 +259,19 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 		INSERT INTO batches (batch_id, device_id, user_id, type_identifier, reason,
 		                     sample_count, deletion_count, aggregate_count,
 		                     activity_summary_count, bytes, exported_at,
-		                     wake_id, trigger, parse_ms, insert_ms, device_token_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, $15)
-		ON CONFLICT (user_id, batch_id) DO NOTHING`,
+		                     wake_id, trigger, parse_ms, insert_ms, device_token_id, device_generation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, $15, $16)
+		ON CONFLICT (user_id, device_generation, batch_id) DO NOTHING`,
 		b.Header.BatchID, b.Header.DeviceID, userID, b.Header.Type, b.Header.Reason,
 		b.Header.SampleCount, b.Header.DeletionCount, b.Header.AggregateCount,
 		b.Header.ActivitySummaryCount, bodyBytes,
-		msToTime(b.Header.ExportedAt), wakeID, trigger, b.ParseMs, deviceTokenID)
+		msToTime(b.Header.ExportedAt), wakeID, trigger, b.ParseMs, deviceTokenID, generation)
 	if err != nil {
 		return res, fmt.Errorf("reserve batch: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		res.DuplicateBatch = true
-		res.Duplicates = int64(len(b.Samples))
-		if err := tx.Commit(ctx); err != nil {
-			return res, fmt.Errorf("commit duplicate batch: %w", err)
-		}
-		return res, nil
+		// An older batch has no verifiable body/result. Never invent its receipt.
+		return res, errBatchConflict
 	}
 
 	// Initialize only newly approved hosted accounts. PostgreSQL and the phone
@@ -394,10 +402,13 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	// reservation and commit are intentionally excluded. parse_ms is measured in
 	// the handler and was stored on the reserved row.
 	insertMs := time.Since(insertStart).Milliseconds()
-	_, err = tx.Exec(ctx, `UPDATE batches SET insert_ms = $2 WHERE batch_id = $1 AND user_id = $3`,
-		b.Header.BatchID, insertMs, userID)
+	_, err = tx.Exec(ctx, `UPDATE batches SET insert_ms = $2 WHERE batch_id = $1 AND user_id = $3 AND device_generation = $4`,
+		b.Header.BatchID, insertMs, userID, generation)
 	if err != nil {
 		return res, fmt.Errorf("update batch telemetry: %w", err)
+	}
+	if err := finishBatchReceipt(ctx, tx, b, userID, generation, &res); err != nil {
+		return res, fmt.Errorf("finish receipt: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

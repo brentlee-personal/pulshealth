@@ -168,3 +168,14 @@ func TestIntegration_FamilyHealthBatchReplayReturnsOriginalReceipt(t *testing.T)
 		t.Error("identical retry changed its committed receipt")
 	}
 }
+
+func TestIntegration_FamilyHealthBatchDigestIncludesTrailingBytes(t *testing.T) {
+	f := familyTestSetup(t)
+	body := f.body(f.uuid(0x650), f.uuid(0x651), 62.5)
+	if status, _ := f.post(t, f.actors[0], body); status != http.StatusOK {
+		t.Fatalf("initial upload status=%d", status)
+	}
+	if status, _ := f.post(t, f.actors[0], body+"\n"); status != http.StatusConflict {
+		t.Errorf("changed decompressed bytes status=%d, want 409", status)
+	}
+}

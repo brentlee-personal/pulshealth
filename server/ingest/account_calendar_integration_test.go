@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,10 +35,20 @@ func TestIntegration_AccountCalendarAndDeletedOwner(t *testing.T) {
 		_, _ = admin.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, user)
 	})
 	batch := func(n int, zone string) *Batch {
-		return &Batch{Header: BatchHeader{
+		header := BatchHeader{
 			BatchID: fmt.Sprintf("%08x-%04x-4000-8000-%012x", run>>32, 0x340+n, run&0xffffffffffff),
 			UserID:  user, DeviceTokenID: token.ID, DeviceID: "calendar-test", Type: "probe", Reason: "manual", TimeZoneID: zone,
-		}}
+		}
+		wire, err := json.Marshal(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := ParseBatch(strings.NewReader(string(wire) + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.Header.UserID, parsed.Header.DeviceTokenID = user, token.ID
+		return parsed
 	}
 	assertZone := func(want string, pending bool) {
 		t.Helper()

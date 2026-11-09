@@ -92,14 +92,12 @@ func TestIntegration_IngestRoundTrip(t *testing.T) {
 		t.Fatalf("first insert: %+v", res)
 	}
 
-	// Retried batch must be idempotent: same rows, all duplicates.
+	// Retried batch returns its first committed outcome without writing again.
 	res2, err := store.InsertBatch(ctx, batch, int64(len(body)))
 	if err != nil {
 		t.Fatalf("retry InsertBatch: %v", err)
 	}
-	if res2.Accepted != 0 || res2.Duplicates != 3 || !res2.DuplicateBatch {
-		t.Fatalf("retried insert: %+v", res2)
-	}
+	assertStoredBatchReplay(t, res, res2)
 
 	// Deletion batch removes the quantity sample.
 	delBatchID := fmt.Sprintf("%08x-0004-4000-8000-%012x", run>>32, run&0xffffffffffff)
@@ -293,9 +291,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry InsertBatch: %v", err)
 	}
-	if res2.Accepted != 0 || res2.Duplicates != 5 || res2.RoutePoints != 0 || res2.SeriesPoints != 0 || !res2.DuplicateBatch {
-		t.Fatalf("retried insert: %+v", res2)
-	}
+	assertStoredBatchReplay(t, res, res2)
 
 	// Spot-check stored shapes.
 	var beatCount, voltLen, ptCount int

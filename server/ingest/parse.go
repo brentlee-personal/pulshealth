@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -293,6 +294,7 @@ type Deletion struct {
 
 // Batch is a fully parsed NDJSON batch.
 type Batch struct {
+	bodyDigest        []byte
 	Header            BatchHeader
 	Samples           []Sample
 	Deletions         []Deletion
@@ -524,7 +526,8 @@ func validLocalDate(s string) bool {
 
 // ParseBatch stream-parses a gunzipped NDJSON body line by line.
 func ParseBatch(r io.Reader) (*Batch, error) {
-	sc := bufio.NewScanner(r)
+	digest := sha256.New()
+	sc := bufio.NewScanner(io.TeeReader(r, digest))
 	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxLine)
 
 	if !sc.Scan() {
@@ -733,6 +736,7 @@ func ParseBatch(r io.Reader) (*Batch, error) {
 	if err := sc.Err(); err != nil {
 		return nil, wrapParseErr(err, "reading body: %v", err)
 	}
+	b.bodyDigest = digest.Sum(nil)
 	return &b, nil
 }
 

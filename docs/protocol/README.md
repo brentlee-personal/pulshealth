@@ -542,9 +542,12 @@ deliberately re-sends samples, every rule below makes a re-send a no-op.
 ### 6.1 Batch replay
 
 `batchID` is stable across retries of one upload. A receiver MAY record it
-and short-circuit a replay (the reference server reserves the ID in the same
-transaction as the data, so a retry that arrives after the commit does no
-work and reports every sample as a duplicate). A receiver that does not track
+and short-circuit a replay. The reference server scopes it to the member and
+server-assigned device generation, hashes the complete decompressed NDJSON
+bytes, and commits the original result atomically with the data. An identical
+retry returns that original result; a different body under the same key is
+**409** and changes no health data. An old batch without a verifiable receipt
+also fails closed rather than inventing one. A receiver that does not track
 batch IDs is still conformant provided the per-line rules hold.
 
 ### 6.2 Samples
@@ -620,13 +623,16 @@ never as a failure. The reference server returns `200` with
 | Count | Meaning on the reference server |
 |---|---|
 | `accepted` | sample lines that created a row |
-| `duplicates` | sample lines whose UUID was already stored (`sampleCount − accepted`; the whole `sampleCount` when the batch ID was a replay) |
+| `duplicates` | sample lines whose UUID was already stored on the first committed application (`sampleCount − accepted`); an identical batch retry repeats the original counts |
 | `deleted` | sample rows actually removed by deletion lines |
 | `routePoints`, `seriesPoints` | points that created a row |
 | `aggregateSamples`, `activitySummaries` | distinct buckets and days upserted (inserted or overwritten); a bucket or day named twice in one batch counts once |
 
 Receivers that return a body SHOULD use this shape so the fixture corpus and
 the smoke test can check them.
+
+Counts describe the first committed application, not new writes made while
+returning a cached receipt. The optional Puls v1 JSON count fields are unchanged.
 
 ### 7.2 Errors
 

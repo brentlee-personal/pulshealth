@@ -459,6 +459,11 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.InsertBatch(insertCtx, batch, cr.n)
 	insertDur := time.Since(insertStart)
 	if err != nil {
+		if errors.Is(err, errBatchConflict) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "batch key conflicts with a committed upload"})
+			s.recordBatchRejection(r, http.StatusConflict, "conflict", cr.n)
+			return
+		}
 		s.log.Error("batch insert failed",
 			"batch_id", batch.Header.BatchID, "stage", "insert")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "insert failed"})
@@ -544,6 +549,8 @@ func batchRejectionMessage(stage string) string {
 		return "insert failed"
 	case "protocol":
 		return "unsupported protocol version"
+	case "conflict":
+		return "batch key conflicts with a committed upload"
 	default:
 		return "batch rejected"
 	}
