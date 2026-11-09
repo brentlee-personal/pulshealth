@@ -13,6 +13,7 @@ const admin = new Client({ connectionString: adminUrl });
 describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", () => {
   beforeAll(async () => {
     process.env.WEB_ACCOUNTS = "true";
+    process.env.TRUST_PROXY_HEADERS = "true";
     process.env.DATABASE_URL = webUrl;
     await admin.connect();
     await admin.query("INSERT INTO users(id) VALUES($1)", [member]);
@@ -50,7 +51,10 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
     form.set("confirm", "synthetic replacement passphrase");
     const { POST } = await import("@/app/api/auth/invite/route");
     const response = await POST(new NextRequest("https://viewer.synthetic.invalid/api/auth/invite", {
-      method: "POST", body: form, headers: { origin: "https://viewer.synthetic.invalid" },
+      method: "POST", body: form, headers: {
+        host: "viewer.synthetic.invalid", origin: "https://viewer.synthetic.invalid",
+        "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.229",
+      },
     }));
     const observed = await admin.query<{ password_preserved: boolean; browser_preserved: boolean }>(
       `SELECT password_hash=$2 AS password_preserved,
@@ -62,7 +66,7 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
     if (!owner) throw new Error("Existing synthetic account disappeared");
     expect({
       welcomed: response.headers.get("location") === "/?notice=welcome",
-      issuedBrowser: response.headers.has("set-cookie"),
+      issuedBrowser: /__Host-puls-session=[^;\s]+/.test(response.headers.get("set-cookie") ?? ""),
       passwordPreserved: owner.password_preserved,
       browserPreserved: owner.browser_preserved,
     }).toEqual({ welcomed: false, issuedBrowser: false, passwordPreserved: true, browserPreserved: true });
