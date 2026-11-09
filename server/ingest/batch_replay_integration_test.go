@@ -46,23 +46,7 @@ func TestIntegration_FamilyHealthConcurrentReplay(t *testing.T) {
 			results <- outcome{status: response.StatusCode, data: data, err: err}
 		}()
 	}
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		var waiting int
-		if err := f.admin.QueryRow(f.ctx, `SELECT count(*) FROM pg_locks
-			WHERE relation='family_batch_receipts'::regclass AND mode='RowExclusiveLock' AND NOT granted`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting == 2 {
-			break
-		}
-		select {
-		case <-tick.C:
-		case <-f.ctx.Done():
-			t.Fatal("both real transactions did not reach the receipt lock")
-		}
-	}
+	waitReceiptWriters(t, f, 2)
 	if err := lock.Commit(f.ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +64,27 @@ func TestIntegration_FamilyHealthConcurrentReplay(t *testing.T) {
 		}
 		if count != 1 {
 			t.Errorf("concurrent retry left %d rows in %s, want 1", count, table)
+		}
+	}
+}
+
+func waitReceiptWriters(t *testing.T, f *familyTestFixture, want int) {
+	t.Helper()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var waiting int
+		if err := f.admin.QueryRow(f.ctx, `SELECT count(*) FROM pg_locks
+			WHERE relation='family_batch_receipts'::regclass AND mode='RowExclusiveLock' AND NOT granted`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == want {
+			break
+		}
+		select {
+		case <-tick.C:
+		case <-f.ctx.Done():
+			t.Fatal("real transactions did not reach the receipt lock")
 		}
 	}
 }
