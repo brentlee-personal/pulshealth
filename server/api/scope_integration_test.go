@@ -182,7 +182,7 @@ func TestIntegrationUsersEndpoint(t *testing.T) {
 	store, ctx, cleanup := integrationStore(t)
 	defer cleanup()
 
-	users, err := store.Users(ctx)
+	users, err := store.Users(ctx, defaultUserID)
 	if err != nil {
 		t.Fatalf("Users: %v (as api_reader this means the batches grant is missing)", err)
 	}
@@ -229,36 +229,14 @@ func testUsersEndpoint(t *testing.T, ctx context.Context, store *Store, fixtures
 	}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	open := get(t, &Server{store: store, token: "scope-integration", log: logger, defaultUserID: fixtures[0].userID, multiUser: true})
-	if !open.MultiUser || open.Default != fixtures[0].userID {
-		t.Fatalf("open response = default %q multiUser %v", open.Default, open.MultiUser)
-	}
-	byID := map[string]User{}
-	for _, u := range open.Users {
-		byID[u.UserID] = u
-	}
-	for _, f := range fixtures {
-		u, ok := byID[f.userID]
-		if !ok {
-			t.Fatalf("user %s (%s) missing from %+v", f.userID, f.name, open.Users)
+	for _, fixture := range fixtures {
+		response := get(t, &Server{store: store, authorize: testAuthorize("scope-integration", fixture.userID), log: logger})
+		if response.MultiUser || response.Default != fixture.userID || len(response.Users) != 1 || response.Users[0].UserID != fixture.userID {
+			t.Fatalf("response is not restricted to its credential: %+v", response)
 		}
-		if deref(u.Name) != f.name || u.Batches != f.batches || u.UploadedSamples != f.samples {
-			t.Fatalf("user %s = %+v, want name %q batches %d samples %d", f.name, u, f.name, f.batches, f.samples)
+		u := response.Users[0]
+		if u.Name != nil || u.Email != nil || u.CreatedAt != 0 || u.LastSync != nil || u.Batches != 0 || u.UploadedSamples != 0 {
+			t.Fatal("identity metadata exposed health profile or upload history")
 		}
-		if u.LastSync == nil {
-			t.Fatalf("user %s has no lastSync despite %d batches", f.name, f.batches)
-		}
-		if u.CreatedAt <= 0 {
-			t.Fatalf("user %s createdAt = %d", f.name, u.CreatedAt)
-		}
-	}
-	// The two fixtures uploaded at different instants; the later one wins.
-	if a, b := byID[fixtures[0].userID], byID[fixtures[1].userID]; *a.LastSync <= *b.LastSync {
-		t.Fatalf("lastSync A %d should be after B %d (A has the later batch)", *a.LastSync, *b.LastSync)
-	}
-
-	closed := get(t, &Server{store: store, token: "scope-integration", log: logger, defaultUserID: fixtures[1].userID})
-	if closed.MultiUser || len(closed.Users) != 1 || closed.Users[0].UserID != fixtures[1].userID {
-		t.Fatalf("closed response = %+v, want only %s", closed, fixtures[1].userID)
 	}
 }

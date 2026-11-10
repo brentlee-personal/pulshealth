@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -69,6 +75,36 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 	}
 	bearer := apiBase64.EncodeToString(secret)
 	path := apiTestKeys(t)
+	server := httptest.NewServer((&Server{store: store, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
+			return store.authorizeAPI(ctx, bearer, claims.Issuer, path)
+		}}).routes())
+	defer server.Close()
+	httpCheck := func(want int) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/users", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("HTTP status=%d, want %d", response.StatusCode, want)
+		}
+		if want == http.StatusOK {
+			var body UsersResponse
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Default != member || body.MultiUser || len(body.Users) != 1 || body.Users[0].UserID != member {
+				t.Fatal("HTTP response was not restricted to the credential's member")
+			}
+		}
+	}
 	check := func(want error) {
 		t.Helper()
 		got, err := store.authorizeAPI(ctx, bearer, claims.Issuer, path)
@@ -78,6 +114,13 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 		if want == nil && (got == nil || !got.Principal.equals(principal) || got.TokenHash != hash) {
 			t.Fatal("resolved authority lost its owning member or opaque token binding")
 		}
+		status := http.StatusOK
+		if errors.Is(want, errAPICredential) {
+			status = http.StatusUnauthorized
+		} else if errors.Is(want, errAPIAuthority) {
+			status = http.StatusServiceUnavailable
+		}
+		httpCheck(status)
 	}
 	check(nil)
 	for _, statement := range []string{
@@ -105,6 +148,14 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 	if _, err := store.authorizeAPI(ctx, bearer, claims.Issuer, path+".missing"); !errors.Is(err, errAPIAuthority) {
 		t.Fatalf("missing public keys: %v, want authorization unavailable", err)
 	}
+	if err := os.Rename(path, path+".retired"); err != nil {
+		t.Fatal(err)
+	}
+	httpCheck(http.StatusServiceUnavailable)
+	if err := os.Rename(path+".retired", path); err != nil {
+		t.Fatal(err)
+	}
+	check(nil)
 	if _, err := admin.Exec(ctx, "UPDATE auth.accounts SET disabled_at=now() WHERE id=$1", account); err != nil {
 		t.Fatal(err)
 	}

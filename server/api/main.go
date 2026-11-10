@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +23,6 @@ import (
 )
 
 const (
-	defaultUserID   = "5ea4d000-0000-4000-8000-000000000001"
 	shutdownTimeout = 15 * time.Second
 	// Ceiling on a single handler's database work. Generous enough for the
 	// widest legitimate query, short enough that a stuck one returns its
@@ -60,8 +58,7 @@ const (
 
 type apiStore interface {
 	Ping(context.Context) error
-	// Who the database holds: the one read that is not about a single user.
-	Users(context.Context) ([]User, error)
+	Users(context.Context, string) ([]User, error)
 	// Every other read takes the user it is for as its second argument —
 	// explicit rather than baked into the store, so a handler cannot forget
 	// it and a fake can record which user it was asked about.
@@ -87,15 +84,9 @@ type apiStore interface {
 }
 
 type Server struct {
-	store apiStore
-	token string
-	log   *slog.Logger
-
-	// The user a request is answered for when it names none (PULS_USER_ID;
-	// empty means the seeded default), and whether ?user= may name anyone
-	// else (PULS_MULTI_USER, off by default). See scopeUser.
-	defaultUserID string
-	multiUser     bool
+	store     apiStore
+	authorize func(context.Context, string) (*apiAuthority, error)
+	log       *slog.Logger
 
 	// The calendar zone (PULS_TIME_ZONE) instants are rendered in where a
 	// response is prose rather than JSON — the markdown summary. The store
@@ -162,34 +153,13 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	token := os.Getenv("PULS_API_TOKEN")
-	if token == "" {
-		return errors.New("PULS_API_TOKEN must be set")
-	}
-	if err := refusePlaceholder("PULS_API_TOKEN", token); err != nil {
+	authorityConfig, err := loadAPIAuthorityConfig(os.Getenv)
+	if err != nil {
 		return err
 	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		return errors.New("DATABASE_URL must be set")
-	}
-	// The user a request is answered for when it names none. The web viewer
-	// honours the same PULS_USER_ID; the API used to bake it into the store,
-	// so nothing but a second deployment could read a second user.
-	userID := os.Getenv("PULS_USER_ID")
-	if userID == "" {
-		userID = defaultUserID
-	}
-	if !isUUID(userID) {
-		return errors.New("PULS_USER_ID must be a UUID")
-	}
-	// Whether ?user= may select anyone but that user. Off by default: the
-	// bearer token is one static secret that docs/ai.md tells people to hand
-	// to a ChatGPT Action, and turning this on widens what it reads from one
-	// person to everyone on the server.
-	multiUser, err := parseBoolEnv("PULS_MULTI_USER", os.Getenv("PULS_MULTI_USER"), false)
-	if err != nil {
-		return err
 	}
 	// Same switch, same default (off), same meaning and same spelling rule
 	// (envbool.go) as ingest's: only behind a trusted proxy, and then the LAST
@@ -236,12 +206,13 @@ func run(logger *slog.Logger) error {
 	lifetime, endLifetime := context.WithCancel(context.Background())
 	defer endLifetime()
 
+	store := NewStore(pool, loc)
 	srv := &Server{
-		store:             NewStore(pool, loc),
-		token:             token,
+		store: store,
+		authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
+			return store.authorizeAPI(ctx, bearer, authorityConfig.Issuer, authorityConfig.PublicKeyFile)
+		},
 		log:               logger,
-		defaultUserID:     userID,
-		multiUser:         multiUser,
 		loc:               loc,
 		trustProxyHeaders: trustProxyHeaders,
 		lifetime:          lifetime,
@@ -249,8 +220,6 @@ func run(logger *slog.Logger) error {
 	logger.Info("starting",
 		"addr", addr,
 		"time_zone", loc.String(),
-		"default_user", userID,
-		"multi_user", multiUser,
 		"trust_proxy_headers", trustProxyHeaders,
 	)
 	httpSrv := &http.Server{
@@ -447,7 +416,16 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
+		var authority *apiAuthority
+		err := errAPICredential
+		if ok && s.authorize != nil {
+			authority, err = s.authorize(r.Context(), got)
+		}
+		if errors.Is(err, errAPIAuthority) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization unavailable"})
+			return
+		}
+		if err != nil || authority == nil || !authority.Principal.valid() {
 			// A successful request never costs a token: a client polling this
 			// API legitimately must never be throttled.
 			s.limiter().recordFailure(ip, time.Now())
@@ -458,7 +436,9 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
-		next(w, r)
+		ctx := context.WithValue(r.Context(), apiAuthorityKey{}, authority)
+		ctx = withRequestUser(ctx, authority.Principal.MemberID)
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -1127,15 +1107,19 @@ func withRequestUser(ctx context.Context, user string) context.Context {
 // comment above) and hands it to next through the request context.
 func (s *Server) scopeUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := s.defaultUser()
+		user := s.requestUser(r)
+		if user == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 		if raw := strings.TrimSpace(r.URL.Query().Get("user")); raw != "" {
 			if !isUUID(raw) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user: must be a UUID"})
 				return
 			}
-			if !s.multiUser && !sameUser(raw, user) {
-				s.log.Warn("refused a request for another user", "path", r.URL.Path, "user", raw)
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "multi-user reads are disabled"})
+			if !sameUser(raw, user) {
+				s.log.Warn("refused a request for another member", "route", r.Pattern)
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "member is outside this credential"})
 				return
 			}
 			user = strings.ToLower(raw)
@@ -1144,22 +1128,10 @@ func (s *Server) scopeUser(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requestUser is the user the request is answered for: what scopeUser
-// settled, or — for a handler run without the middleware — the default.
+// requestUser never substitutes a configured or seeded member.
 func (s *Server) requestUser(r *http.Request) string {
-	if user, ok := r.Context().Value(requestUserKey{}).(string); ok && user != "" {
-		return user
-	}
-	return s.defaultUser()
-}
-
-// defaultUser is PULS_USER_ID, or the seeded default for a Server built as
-// a struct literal (every test).
-func (s *Server) defaultUser() string {
-	if s.defaultUserID == "" {
-		return defaultUserID
-	}
-	return strings.ToLower(s.defaultUserID)
+	user, _ := r.Context().Value(requestUserKey{}).(string)
+	return user
 }
 
 // location is the zone prose responses render instants in: PULS_TIME_ZONE,

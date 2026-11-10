@@ -133,9 +133,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     const read = (token: string, type = PERMISSIONS.record_types[0]) => GET(new NextRequest(
       `${resource}/v1/metrics/daily?types=${encodeURIComponent(type)}&start=1767571200000&end=1767657600000`,
       { headers: { Authorization: `Bearer ${token}` } }), { params: Promise.resolve({ path: ["metrics", "daily"] }) });
-    const oldUrl = process.env.PULS_API_URL, oldToken = process.env.PULS_API_TOKEN;
+    const oldUrl = process.env.PULS_API_URL;
     process.env.PULS_API_URL = "http://synthetic-api:8081";
-    process.env.PULS_API_TOKEN = "synthetic-internal-only";
     const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ metrics: [] }));
     try {
       const token = signed();
@@ -167,7 +166,6 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     } finally {
       upstream.mockRestore();
       if (oldUrl === undefined) delete process.env.PULS_API_URL; else process.env.PULS_API_URL = oldUrl;
-      if (oldToken === undefined) delete process.env.PULS_API_TOKEN; else process.env.PULS_API_TOKEN = oldToken;
     }
   });
 

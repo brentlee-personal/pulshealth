@@ -3,7 +3,8 @@ import { isUuid } from "@/lib/uuid";
 import { query } from "@/lib/db";
 import { healthResource, readOAuthConfig } from "@/lib/oauth/config";
 import { verifyAccessToken } from "@/lib/oauth/jwt";
-import { defaultReadWindow, readRequestAllowed } from "@/lib/oauth/permissions";
+import { defaultReadWindow, readRequestAllowed, type ReadPermissions } from "@/lib/oauth/permissions";
+import { createAPICredential } from "@/lib/oauth/apiCredential";
 import { CATALOG } from "@/lib/catalog";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   if (!claims || !isUuid(claims.grant_id) || !claims.principal) return answer(401, { error: "invalid_token" });
   const principal = claims.principal;
   const permissions = { operations: principal.allowed_operations, record_types: principal.allowed_types, time_range: principal.allowed_time_range };
+  let upstreamPermissions: ReadPermissions = permissions;
   const path = (await context.params).path.join("/");
   const allowed = Object.hasOwn(routes, path) ? routes[path] : undefined;
   if (!allowed) return answer(404, { error: "not_found" });
@@ -62,6 +64,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
       [path === "activity/summary" ? "HKActivitySummaryTypeIdentifier" : path === "sleep/daily" ? "HKCategoryTypeIdentifierSleepAnalysis" : "HKWorkoutTypeIdentifier"];
     if (types.some((value) => !value) || new Set(types).size !== types.length || types.length > 50) return answer(400, { error: "invalid_query" });
     if (!readRequestAllowed(permissions, "metrics:read", types, Number(start), Number(end))) return answer(403, { error: "outside_grant" });
+    upstreamPermissions = { operations: ["metrics:read"], record_types: types,
+      time_range: { from: new Date(Number(start)).toISOString(), until: new Date(Number(end)).toISOString() } };
     if (path === "metrics/daily") params.set("types", types.join(","));
   }
   try {
@@ -85,16 +89,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
       return answer(200, { types });
     }
     const base = process.env.PULS_API_URL;
-    const token = process.env.PULS_API_TOKEN;
-    if (!base || !token) return answer(503, { error: "unavailable" });
+    if (!base) return answer(503, { error: "unavailable" });
+    const credential = await createAPICredential(config, { kind: "grant", subjectToken: authorization.slice(7), permissions: upstreamPermissions });
+    if (!credential) return answer(401, { error: "invalid_token" });
     const upstream = new URL(`${base.replace(/\/+$/, "")}/v1/${path}`);
     upstream.search = params.toString();
-    upstream.searchParams.set("user", claims.sub);
     const response = await fetch(upstream, {
-      headers: { Authorization: `Bearer ${token}` }, redirect: "error", cache: "no-store",
+      headers: { Authorization: `Bearer ${credential.token}` }, redirect: "error", cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) return answer(response.status === 404 ? 404 : 503, { error: "unavailable" });
+    if (!response.ok) return answer([400, 401, 403, 404].includes(response.status) ? response.status : 503, { error: "unavailable" });
     const body = await response.json();
     return answer(200, body);
   } catch {

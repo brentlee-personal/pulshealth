@@ -123,8 +123,8 @@ func TestIntegrationSummaryIsPerUser(t *testing.T) {
 				len(w.ByActivityType) != 1 || w.ByActivityType[0] != (SummaryWorkoutType{"running", 1}) {
 				t.Fatalf("workouts = %+v", w)
 			}
-			if data.Coverage.DaysWithData != 1 || data.Coverage.LastSync == nil || *data.Coverage.LastSync != syncedAt.UnixMilli() {
-				t.Fatalf("coverage = %+v, want 1 day and last sync %d", data.Coverage, syncedAt.UnixMilli())
+			if data.Coverage.DaysWithData != 1 || data.Coverage.LastSync != nil {
+				t.Fatalf("coverage = %+v, want 1 day without upload history", data.Coverage)
 			}
 		})
 	}
@@ -143,7 +143,9 @@ func TestIntegrationSummaryIsPerUser(t *testing.T) {
 	// Over HTTP, ?user= picks whose page is rendered.
 	t.Run("endpoint", func(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-		srv := &Server{store: store, token: "summary-integration", log: logger, defaultUserID: users[0].userID, multiUser: true, loc: loc}
+		srv := &Server{store: store, authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
+			return testAuthorize(bearer, bearer)(ctx, bearer)
+		}, log: logger, loc: loc}
 		server := httptest.NewServer(srv.routes())
 		defer server.Close()
 
@@ -152,7 +154,7 @@ func TestIntegrationSummaryIsPerUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewRequest: %v", err)
 			}
-			req.Header.Set("Authorization", "Bearer summary-integration")
+			req.Header.Set("Authorization", "Bearer "+u.userID)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("Do: %v", err)

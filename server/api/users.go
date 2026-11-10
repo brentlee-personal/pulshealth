@@ -5,10 +5,7 @@ import (
 	"net/http"
 )
 
-// Users: GET /v1/users lists who the database holds, so a client can find a
-// user id to pass as ?user= — the discovery half of per-request scoping
-// (see scopeUser in main.go). It is the one endpoint whose answer is not
-// about a single user.
+// GET /v1/users returns only the credential's member and reporting zone.
 
 // User is one row of GET /v1/users: the users row plus what the batches log
 // says about its uploads. The counts come from batches alone — one row per
@@ -16,16 +13,16 @@ import (
 type User struct {
 	TimeZone  string  `json:"timeZone"`
 	UserID    string  `json:"userID"`
-	Name      *string `json:"name"`
-	Email     *string `json:"email"`
-	CreatedAt int64   `json:"createdAt"`
+	Name      *string `json:"name,omitempty"`
+	Email     *string `json:"email,omitempty"`
+	CreatedAt int64   `json:"createdAt,omitempty"`
 	// Epoch milliseconds of the most recent batch; null when nothing has
 	// ever been uploaded for this user.
-	LastSync *int64 `json:"lastSync"`
+	LastSync *int64 `json:"lastSync,omitempty"`
 	// Batches received, and the samples they declared (the sum of their
 	// sampleCount headers).
-	Batches         int64 `json:"batches"`
-	UploadedSamples int64 `json:"uploadedSamples"`
+	Batches         int64 `json:"batches,omitempty"`
+	UploadedSamples int64 `json:"uploadedSamples,omitempty"`
 }
 
 // UsersResponse is GET /v1/users.
@@ -39,24 +36,9 @@ type UsersResponse struct {
 	TimeZone string `json:"timeZone"`
 }
 
-// Users returns every users row, oldest first, with its upload counts.
-func (st *Store) Users(ctx context.Context) ([]User, error) {
+func (st *Store) Users(ctx context.Context, member string) ([]User, error) {
 	rows, err := st.pool.Query(ctx, `
-		SELECT u.id::text, u.name, u.email,
-		       (extract(epoch FROM u.created_at) * 1000)::bigint,
-		       (extract(epoch FROM b.last_sync) * 1000)::bigint,
-		       COALESCE(b.batches, 0)::bigint,
-		       COALESCE(b.samples, 0)::bigint, puls_user_time_zone(u.id)
-		FROM users u
-		LEFT JOIN (
-			SELECT user_id,
-			       max(received_at) AS last_sync,
-			       count(*) AS batches,
-			       sum(sample_count) AS samples
-			FROM batches
-			GROUP BY user_id
-		) b ON b.user_id = u.id
-		ORDER BY u.created_at, u.id`)
+		SELECT id::text, puls_user_time_zone(id) FROM users WHERE id=$1`, member)
 	if err != nil {
 		return nil, err
 	}
@@ -65,16 +47,7 @@ func (st *Store) Users(ctx context.Context) ([]User, error) {
 	out := make([]User, 0)
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(
-			&u.UserID,
-			&u.Name,
-			&u.Email,
-			&u.CreatedAt,
-			&u.LastSync,
-			&u.Batches,
-			&u.UploadedSamples,
-			&u.TimeZone,
-		); err != nil {
+		if err := rows.Scan(&u.UserID, &u.TimeZone); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -83,24 +56,19 @@ func (st *Store) Users(ctx context.Context) ([]User, error) {
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := s.store.Users(r.Context())
+	users, err := s.store.Users(r.Context(), s.requestUser(r))
 	if err != nil {
 		s.writeStoreError(w, err, "users")
 		return
 	}
-	def := s.defaultUser()
-	if !s.multiUser {
-		// With the gate off nobody else can be read, so nobody else is
-		// listed: the endpoint describes what this deployment serves, not
-		// what the database holds.
-		kept := make([]User, 0, 1)
-		for _, u := range users {
-			if sameUser(u.UserID, def) {
-				kept = append(kept, u)
-			}
+	def := s.requestUser(r)
+	kept := make([]User, 0, 1)
+	for _, u := range users {
+		if sameUser(u.UserID, def) {
+			kept = append(kept, User{UserID: u.UserID, TimeZone: u.TimeZone})
 		}
-		users = kept
 	}
+	users = kept
 	zone := s.location().String()
 	for _, u := range users {
 		if sameUser(u.UserID, s.requestUser(r)) && u.TimeZone != "" {
@@ -110,7 +78,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, UsersResponse{
 		Users:     users,
 		Default:   def,
-		MultiUser: s.multiUser,
+		MultiUser: false,
 		TimeZone:  zone,
 	})
 }

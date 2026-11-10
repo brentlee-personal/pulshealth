@@ -85,10 +85,10 @@ func TestIntegrationAccountTimeZones(t *testing.T) {
 	}
 	wg.Wait()
 	for i, id := range ids {
-		server := &Server{store: st, multiUser: true, defaultUserID: ids[0]}
+		server := &Server{store: st}
 		req := httptest.NewRequest("GET", "/v1/users?user="+id, nil)
 		rec := httptest.NewRecorder()
-		server.scopeUser(server.handleUsers)(rec, req)
+		server.scopeUser(server.handleUsers)(rec, req.WithContext(withRequestUser(req.Context(), id)))
 		var body UsersResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)

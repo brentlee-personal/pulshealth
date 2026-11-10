@@ -21,52 +21,32 @@ func twoUsers() []User {
 func TestUsersEndpointShape(t *testing.T) {
 	t.Parallel()
 
-	srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID, true)
+	srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID)
 	rec := serveAuthorized(t, srv, http.MethodGet, "/v1/users", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// The wire shape, key by key, as a client written from the OpenAPI
-	// document would read it.
 	var body struct {
 		Users     []map[string]json.RawMessage `json:"users"`
 		Default   string                       `json:"default"`
 		MultiUser bool                         `json:"multiUser"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatal(err)
 	}
-	if body.Default != defaultUserID || !body.MultiUser {
-		t.Fatalf("default = %q multiUser = %v, want %q true", body.Default, body.MultiUser, defaultUserID)
+	if body.Default != defaultUserID || body.MultiUser || len(body.Users) != 1 {
+		t.Fatalf("metadata is not personal: %s", rec.Body.String())
 	}
-	if len(body.Users) != 2 {
-		t.Fatalf("users = %d, want both with the gate on", len(body.Users))
-	}
-	for i, u := range body.Users {
-		for _, key := range []string{"userID", "name", "email", "createdAt", "lastSync", "batches", "uploadedSamples"} {
-			if _, ok := u[key]; !ok {
-				t.Errorf("user %d lacks %q: %s", i, key, rec.Body.String())
-			}
-		}
-	}
-	if string(body.Users[0]["lastSync"]) != "1789997400000" || string(body.Users[0]["batches"]) != "12" {
-		t.Errorf("first user = %s", rec.Body.String())
-	}
-	// A user who has never synced carries explicit nulls and zero counts,
-	// never missing keys.
-	if string(body.Users[1]["lastSync"]) != "null" || string(body.Users[1]["batches"]) != "0" || string(body.Users[1]["uploadedSamples"]) != "0" {
-		t.Errorf("second user = %s", rec.Body.String())
-	}
-	if string(body.Users[1]["name"]) != `"Ada"` {
-		t.Errorf("name = %s", body.Users[1]["name"])
+	if len(body.Users[0]) != 2 || string(body.Users[0]["userID"]) != `"`+defaultUserID+`"` {
+		t.Fatalf("metadata exposed more than identity and time zone: %s", rec.Body.String())
 	}
 }
 
-func TestUsersEndpointListsOnlyDefaultWhenDisabled(t *testing.T) {
+func TestUsersEndpointListsOnlyVerifiedMember(t *testing.T) {
 	t.Parallel()
 
-	srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID, false)
+	srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID)
 	rec := serveAuthorized(t, srv, http.MethodGet, "/v1/users", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
@@ -84,7 +64,7 @@ func TestUsersEndpointListsOnlyDefaultWhenDisabled(t *testing.T) {
 
 	// A default user with no users row yet lists nobody — an empty array,
 	// not null — rather than inventing a row.
-	unknown := scopedServer(t, &fakeStore{users: twoUsers()}, configuredUserID, false)
+	unknown := scopedServer(t, &fakeStore{users: twoUsers()}, configuredUserID)
 	rec = serveAuthorized(t, unknown, http.MethodGet, "/v1/users", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -102,7 +82,7 @@ func TestUsersEndpointListsOnlyDefaultWhenDisabled(t *testing.T) {
 func TestUsersEndpointRequiresTheTokenAndReports500(t *testing.T) {
 	t.Parallel()
 
-	srv := scopedServer(t, &fakeStore{err: errors.New("boom")}, defaultUserID, true)
+	srv := scopedServer(t, &fakeStore{err: errors.New("boom")}, defaultUserID)
 	rec := serveAuthorized(t, srv, http.MethodGet, "/v1/users", nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -147,7 +127,7 @@ func TestUsersEndpointReportsTheTimeZone(t *testing.T) {
 		loc  *time.Location
 		want string
 	}{{nil, "UTC"}, {mustLoadZone(t, "Europe/Berlin"), "Europe/Berlin"}} {
-		srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID, false)
+		srv := scopedServer(t, &fakeStore{users: twoUsers()}, defaultUserID)
 		srv.loc = tc.loc
 		rec := serveAuthorized(t, srv, http.MethodGet, "/v1/users", nil)
 		var body struct {

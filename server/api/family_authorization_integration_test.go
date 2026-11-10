@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,7 +30,9 @@ func TestIntegrationServiceCredentialCannotReadMemberHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	serviceToken := "synthetic-family-shared-service-token"
-	server := &Server{store: store, token: serviceToken, defaultUserID: member, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	server := &Server{store: store, authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
+		return store.authorizeAPI(ctx, bearer, "https://viewer.example.com", apiTestKeys(t))
+	}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	httpServer := httptest.NewServer(server.routes())
 	defer httpServer.Close()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/v1/workouts", nil)

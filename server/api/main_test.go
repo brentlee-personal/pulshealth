@@ -157,7 +157,8 @@ func (f *fakeStore) Ping(ctx context.Context) error {
 	return f.err
 }
 
-func (f *fakeStore) Users(context.Context) ([]User, error) {
+func (f *fakeStore) Users(_ context.Context, member string) ([]User, error) {
+	f.lastUser = member
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -227,9 +228,9 @@ func TestHealthzWithoutAuthReturnsOK(t *testing.T) {
 	t.Parallel()
 
 	srv := &Server{
-		store: &fakeStore{},
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		store:     &fakeStore{},
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -690,9 +691,9 @@ func TestProfileRejectsMissingBearerToken(t *testing.T) {
 	t.Parallel()
 
 	srv := &Server{
-		store: &fakeStore{},
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		store:     &fakeStore{},
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/profile", nil)
@@ -732,8 +733,8 @@ func TestProfileReturnsJSONWhenAuthorized(t *testing.T) {
 				BiologicalSex: ptrString("male"),
 			},
 		},
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/profile", nil)
@@ -784,8 +785,8 @@ func TestCatalogTypesReturnsTypesWhenAuthorized(t *testing.T) {
 				},
 			},
 		},
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/catalog/types", nil)
@@ -857,9 +858,9 @@ func TestHealthzReturns503WhenPingFails(t *testing.T) {
 	t.Parallel()
 
 	srv := &Server{
-		store: &fakeStore{err: errors.New("db down")},
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		store:     &fakeStore{err: errors.New("db down")},
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -1471,9 +1472,9 @@ func testServer(t *testing.T, store apiStore) *Server {
 	t.Helper()
 
 	return &Server{
-		store: store,
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		store:     store,
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 }
 

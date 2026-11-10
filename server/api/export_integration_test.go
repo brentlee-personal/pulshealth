@@ -76,7 +76,7 @@ func TestIntegrationExportEndpoint(t *testing.T) {
 			defaultUserID, ringDay.Format("2006-01-02"), nextRingDay.Format("2006-01-02"))
 	}()
 
-	srv := &Server{store: store, token: "export-integration", log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	srv := &Server{store: store, authorize: testAuthorize("export-integration", defaultUserID), log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	server := httptest.NewServer(srv.routes())
 	defer server.Close()
 

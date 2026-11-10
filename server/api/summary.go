@@ -340,16 +340,7 @@ func (st *Store) Summary(ctx context.Context, userID string, days int) (*Summary
 		data.Body = body
 	}
 
-	users, err := st.Users(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("users: %w", err)
-	}
-	for _, u := range users {
-		if sameUser(u.UserID, userID) {
-			data.Coverage.LastSync = u.LastSync
-			break
-		}
-	}
+	// Upload history is outside the credential's record permissions.
 	data.Coverage.DaysWithData = len(covered)
 	return data, nil
 }

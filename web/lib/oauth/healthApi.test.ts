@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { issueAccessToken } from "./jwt";
 import { GET } from "@/app/api/health/v1/[...path]/route";
 import { query } from "../db";
+import { createAPICredential } from "./apiCredential";
 vi.mock("../db", () => ({ query: vi.fn() }));
+vi.mock("./apiCredential", () => ({ createAPICredential: vi.fn() }));
 const oauthKeys = oauthKeyFixture();
 const issuer = "https://viewer.example";
 const user = "5ea4d000-0000-4000-8000-000000000001";
@@ -20,8 +22,10 @@ const request = (path: string, token: string | null = issueAccessToken(config, u
 beforeEach(() => {
   vi.restoreAllMocks(); vi.mocked(query).mockReset();
   Object.assign(process.env, { WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: issuer, PULS_MCP_URL: "https://mcp.example/mcp", ...oauthKeys.env,
-    PULS_API_URL: "http://api:8081", PULS_API_TOKEN: "internal-only" });
+    PULS_API_URL: "http://api:8081" });
   vi.mocked(query).mockResolvedValue([{ id: grant, time_zone: "UTC" }]);
+  vi.mocked(createAPICredential).mockReset();
+  vi.mocked(createAPICredential).mockResolvedValue({ token: "C".repeat(43), expiresIn: 60 });
 });
 describe("public account-scoped health API", () => {
   it("returns 503 for unavailable keys without consulting health storage or another credential", async () => {
@@ -52,8 +56,11 @@ describe("public account-scoped health API", () => {
     const target = "metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=1767571200000&end=1767657600000";
     expect((await request(target)).status).toBe(200);
     const [url, options] = fetcher.mock.calls[0];
-    expect(String(url)).toBe(`http://api:8081/v1/${target}&user=${user}`);
-    expect(options).toMatchObject({ redirect: "error", cache: "no-store", headers: { Authorization: "Bearer internal-only" } });
+    expect(String(url)).toBe(`http://api:8081/v1/${target}`);
+    expect(options).toMatchObject({ redirect: "error", cache: "no-store", headers: { Authorization: `Bearer ${"C".repeat(43)}` } });
+    expect(createAPICredential).toHaveBeenCalledWith(expect.objectContaining({ issuer }), expect.objectContaining({ kind: "grant",
+      permissions: { operations: ["metrics:read"], record_types: [permissions.record_types[0]],
+        time_range: { from: "2026-01-05T00:00:00.000Z", until: "2026-01-06T00:00:00.000Z" } } }));
   });
   it("never returns health counts from its permitted-type metadata list", async () => {
     const metadata = [{ identifier: permissions.record_types[0], kind: "quantity", unit: "count" },
@@ -83,7 +90,7 @@ describe("public account-scoped health API", () => {
     const url = new URL(String(fetcher.mock.calls[0][0]));
     expect(url.searchParams.get("start")).toBe(String(now - 31 * 86400_000));
     expect(url.searchParams.get("end")).toBe(String(now));
-    expect(url.searchParams.get("user")).toBe(user);
+    expect(url.searchParams.has("user")).toBe(false);
   });
   it("rejects cross-account, duplicated, unknown, and unbounded queries", async () => {
     for (const path of [`users?user=${other}`, `users?user=${user}&user=${user}`, "users?debug=true", "workouts?limit=500", "metrics/daily?start=1&end=9999999999999", "sleep/daily", "export", "constructor", "toString", "__proto__"]) {
@@ -103,10 +110,10 @@ describe("public account-scoped health API", () => {
     expect(await response.text()).not.toContain("synthetic authorization outage");
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it("does not leak upstream errors or the deployment token", async () => {
+  it("passes through authorization refusal without leaking upstream errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private internal-only", { status: 401 }));
     const response = await request("workouts");
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
     expect(await response.text()).not.toContain("internal-only");
   });
 });

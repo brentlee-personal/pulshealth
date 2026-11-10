@@ -286,8 +286,8 @@ func TestSummaryEndpoint(t *testing.T) {
 		t.Parallel()
 		store := &fakeStore{}
 		srv := testServer(t, store)
-		srv.multiUser = true
 		other := "0badf00d-0000-4000-8000-000000000002"
+		srv.authorize = testAuthorize("secret", other)
 		if rec := serveAuthorized(t, srv, http.MethodGet, "/v1/summary?user="+other, nil); rec.Code != http.StatusOK {
 			t.Fatalf("status = %d", rec.Code)
 		}

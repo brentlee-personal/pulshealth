@@ -21,9 +21,9 @@ import (
 func exportServer(t *testing.T, store apiStore) *Server {
 	t.Helper()
 	return &Server{
-		store: store,
-		token: "secret",
-		log:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		store:     store,
+		authorize: testAuthorize("secret", defaultUserID),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 }
 

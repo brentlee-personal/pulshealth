@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -58,6 +60,35 @@ type apiClaims struct {
 type apiAuthority struct {
 	Principal apiPrincipal
 	TokenHash [32]byte
+}
+
+type apiAuthorityKey struct{}
+
+type apiAuthorityConfig struct {
+	Issuer        string
+	PublicKeyFile string
+}
+
+func loadAPIAuthorityConfig(getenv func(string) string) (apiAuthorityConfig, error) {
+	for _, retired := range []string{"PULS_API_TOKEN", "PULS_MULTI_USER", "PULS_USER_ID", "PULS_AUTH_PRIVATE_KEY_FILE"} {
+		if getenv(retired) != "" {
+			return apiAuthorityConfig{}, fmt.Errorf("%s is not accepted by the personal API", retired)
+		}
+	}
+	issuer := strings.TrimRight(getenv("PULS_AUTH_ISSUER"), "/")
+	u, err := url.Parse(issuer)
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return apiAuthorityConfig{}, errors.New("PULS_AUTH_ISSUER must be an HTTPS origin")
+	}
+	loopback := u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback()
+	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
+		return apiAuthorityConfig{}, errors.New("PULS_AUTH_ISSUER requires HTTPS except on loopback")
+	}
+	path := getenv("PULS_AUTH_PUBLIC_KEYS_FILE")
+	if _, err := readAPIPublicKeys(path); err != nil {
+		return apiAuthorityConfig{}, err
+	}
+	return apiAuthorityConfig{Issuer: issuer, PublicKeyFile: path}, nil
 }
 
 func (p apiPrincipal) valid() bool {

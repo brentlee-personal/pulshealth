@@ -19,45 +19,41 @@ const (
 	configuredUserID = "c0ffee00-1234-4abc-8def-000000000042"
 )
 
-// scopedServer is a Server with an explicit default user and gate, over store.
-func scopedServer(t *testing.T, store apiStore, defaultUser string, multiUser bool) *Server {
+// Handler tests bind each synthetic credential to one member.
+func scopedServer(t *testing.T, store apiStore, member string) *Server {
 	t.Helper()
 	return &Server{
-		store:         store,
-		token:         "secret",
-		log:           slog.New(slog.NewTextHandler(testWriter{t}, nil)),
-		defaultUserID: defaultUser,
-		multiUser:     multiUser,
+		store:     store,
+		authorize: testAuthorize("secret", member),
+		log:       slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	}
 }
 
-func TestScopeUserDefaultsToConfiguredUser(t *testing.T) {
+func TestScopeUserUsesVerifiedMember(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{}
-	srv := scopedServer(t, store, configuredUserID, false)
+	srv := scopedServer(t, store, configuredUserID)
 	rec := serveAuthorized(t, srv, http.MethodGet, "/v1/profile", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if store.lastUser != configuredUserID {
-		t.Fatalf("store was asked about %q, want the configured default %q", store.lastUser, configuredUserID)
+		t.Fatalf("store was asked about %q, want the verified member %q", store.lastUser, configuredUserID)
 	}
 
-	// A Server built without one — every existing test — serves the seeded
-	// default, exactly as the API always has.
-	bare := testServer(t, store)
-	serveAuthorized(t, bare, http.MethodGet, "/v1/profile", nil)
+	second := scopedServer(t, store, defaultUserID)
+	serveAuthorized(t, second, http.MethodGet, "/v1/profile", nil)
 	if store.lastUser != defaultUserID {
-		t.Fatalf("a Server without defaultUserID asked about %q, want the seeded %q", store.lastUser, defaultUserID)
+		t.Fatal("the second credential did not use its own member")
 	}
 }
 
-func TestScopeUserHonoursUserWhenMultiUser(t *testing.T) {
+func TestScopeUserRefusesSelectionOnEveryRoute(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{}
-	srv := scopedServer(t, store, configuredUserID, true)
+	srv := scopedServer(t, store, configuredUserID)
 
 	// Every authenticated data route, so a handler that forgot to read the
 	// request user fails here rather than answering for the wrong person.
@@ -80,18 +76,16 @@ func TestScopeUserHonoursUserWhenMultiUser(t *testing.T) {
 			sep = "&"
 		}
 		rec := serveAuthorized(t, srv, http.MethodGet, target+sep+"user="+otherUserID, nil)
-		if rec.Code != http.StatusOK && rec.Code != http.StatusNotFound {
+		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s: status = %d: %s", target, rec.Code, rec.Body.String())
 			continue
 		}
-		// Stored lower-cased, the way Postgres renders a uuid, so the catalog
-		// cache keys and the store see one spelling.
-		if store.lastUser != strings.ToLower(otherUserID) {
-			t.Errorf("%s: store was asked about %q, want %q", target, store.lastUser, strings.ToLower(otherUserID))
+		if store.lastUser != "" {
+			t.Errorf("%s: another member reached storage", target)
 		}
 	}
 
-	// Without the parameter the default still applies, gate or no gate.
+	// Without a selector the verified member still applies.
 	store.lastUser = ""
 	serveAuthorized(t, srv, http.MethodGet, "/v1/profile", nil)
 	if store.lastUser != configuredUserID {
@@ -102,38 +96,31 @@ func TestScopeUserHonoursUserWhenMultiUser(t *testing.T) {
 func TestScopeUserRejectsMalformedUser(t *testing.T) {
 	t.Parallel()
 
-	for _, multiUser := range []bool{false, true} {
-		store := &fakeStore{}
-		srv := scopedServer(t, store, configuredUserID, multiUser)
-		for _, raw := range []string{"not-a-uuid", "5ea4d000-0000-4000-8000-00000000000", "00000000-0000-4000-8000-00000000000g"} {
-			rec := serveAuthorized(t, srv, http.MethodGet, "/v1/profile?user="+raw, nil)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("multiUser=%v user=%q: status = %d, want 400: %s", multiUser, raw, rec.Code, rec.Body.String())
-			}
-			assertJSONError(t, rec.Body.Bytes(), "invalid user: must be a UUID")
+	store := &fakeStore{}
+	srv := scopedServer(t, store, configuredUserID)
+	for _, raw := range []string{"not-a-uuid", "5ea4d000-0000-4000-8000-00000000000", "00000000-0000-4000-8000-00000000000g"} {
+		rec := serveAuthorized(t, srv, http.MethodGet, "/v1/profile?user="+raw, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("user=%q: status=%d, want 400", raw, rec.Code)
 		}
-		if store.lastUser != "" {
-			t.Fatalf("multiUser=%v: the store was reached with %q despite a malformed user", multiUser, store.lastUser)
-		}
-		// A bad selector is a mistake by a caller holding the right token,
-		// never a guess at the token, so it costs nothing on the limiter.
-		if got := srv.limiter().size(); got != 0 {
-			t.Fatalf("multiUser=%v: limiter tracks %d addresses after malformed ?user=, want 0", multiUser, got)
-		}
+		assertJSONError(t, rec.Body.Bytes(), "invalid user: must be a UUID")
+	}
+	if store.lastUser != "" || srv.limiter().size() != 0 {
+		t.Fatal("a malformed selector reached storage or charged authentication")
 	}
 }
 
-func TestScopeUserRefusesOtherUserWhenDisabled(t *testing.T) {
+func TestScopeUserRefusesAnotherMember(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{}
-	srv := scopedServer(t, store, configuredUserID, false)
+	srv := scopedServer(t, store, configuredUserID)
 
 	rec := serveAuthorized(t, srv, http.MethodGet, "/v1/profile?user="+otherUserID, nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
-	assertJSONError(t, rec.Body.Bytes(), "multi-user reads are disabled")
+	assertJSONError(t, rec.Body.Bytes(), "member is outside this credential")
 	if store.lastUser != "" {
 		t.Fatalf("the store was reached with %q; a refused request must never answer for anyone", store.lastUser)
 	}
@@ -159,7 +146,7 @@ func TestScopeUserRefusesOtherUserWhenDisabled(t *testing.T) {
 func TestScopeUserRunsAfterAuth(t *testing.T) {
 	t.Parallel()
 
-	srv := scopedServer(t, &fakeStore{}, configuredUserID, false)
+	srv := scopedServer(t, &fakeStore{}, configuredUserID)
 	req := httptest.NewRequest(http.MethodGet, "/v1/profile?user="+otherUserID, nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec := httptest.NewRecorder()
@@ -185,7 +172,7 @@ func TestScopeUserAppliesToExport(t *testing.T) {
 		samples:  &SamplesPage{Type: "HKQuantityTypeIdentifierHeartRate", Kind: "quantity", Samples: []Sample{{UUID: "a"}}},
 		workouts: []WorkoutSummary{{UUID: "b"}},
 	}
-	srv := scopedServer(t, store, configuredUserID, true)
+	srv := scopedServer(t, store, strings.ToLower(otherUserID))
 
 	for _, query := range []string{
 		"format=csv&dataset=samples&type=HKQuantityTypeIdentifierHeartRate&" + exportRange,
@@ -208,7 +195,7 @@ func TestScopeUserAppliesToExport(t *testing.T) {
 
 	// And the gate applies to a download exactly as to a page: refused
 	// before any byte, with the JSON error, not an empty file.
-	closed := scopedServer(t, store, configuredUserID, false)
+	closed := scopedServer(t, store, configuredUserID)
 	rec := getExport(t, closed, "format=csv&dataset=workouts&"+exportRange+"&user="+otherUserID)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -222,7 +209,7 @@ func TestCatalogCacheIsPerUser(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{catalog: []CatalogType{{Identifier: "HKQuantityTypeIdentifierHeartRate", Kind: "quantity"}}}
-	srv := scopedServer(t, store, configuredUserID, true)
+	srv := scopedServer(t, store, configuredUserID)
 
 	for i := range 2 {
 		if rec := serveAuthorized(t, srv, http.MethodGet, "/v1/catalog/types", nil); rec.Code != http.StatusOK {
@@ -232,6 +219,7 @@ func TestCatalogCacheIsPerUser(t *testing.T) {
 	if store.calls.catalog != 1 {
 		t.Fatalf("catalog queries for one user = %d, want 1 (cached)", store.calls.catalog)
 	}
+	srv.authorize = testAuthorize("secret", strings.ToLower(otherUserID))
 	if rec := serveAuthorized(t, srv, http.MethodGet, "/v1/catalog/types?user="+otherUserID, nil); rec.Code != http.StatusOK {
 		t.Fatalf("other user: status = %d", rec.Code)
 	}
@@ -245,15 +233,15 @@ func TestCatalogCacheIsPerUser(t *testing.T) {
 	}
 }
 
-// An authenticated caller can spray ?user= values; the cache must not grow
-// with them.
+// Validated credentials for many members must not grow the cache without a bound.
 func TestCatalogCacheIsBounded(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeStore{catalog: []CatalogType{}}
-	srv := scopedServer(t, store, configuredUserID, true)
+	srv := scopedServer(t, store, configuredUserID)
 	for i := range catalogCacheMaxUsers * 3 {
 		user := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		srv.authorize = testAuthorize("secret", user)
 		if rec := serveAuthorized(t, srv, http.MethodGet, "/v1/catalog/types?user="+user, nil); rec.Code != http.StatusOK {
 			t.Fatalf("user %d: status = %d: %s", i, rec.Code, rec.Body.String())
 		}
