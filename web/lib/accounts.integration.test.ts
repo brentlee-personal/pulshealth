@@ -378,25 +378,29 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
       [stale.hash, B, OTHER_EMAIL],
     );
     await admin.query("UPDATE auth.accounts SET disabled_at = now() WHERE user_id = $1", [B]);
-    const res = await inviteRoute.POST(
-      post("/api/auth/invite", { token: stale.token, password: "a brand new passphrase", confirm: "a brand new passphrase" }, { ip: "198.51.100.70" }),
-    );
-    expect(res.headers.get("location")).toBe(`/invite/${stale.token}?error=invalid`);
-    const login = await loginRoute.POST(post("/api/auth/login", { email: OTHER_EMAIL, password: OTHER_PASSWORD }, { ip: "198.51.100.71" }));
-    expect(login.headers.get("location")).toBe("/login?error=invalid");
+    try {
+      const res = await inviteRoute.POST(
+        post("/api/auth/invite", { token: stale.token, password: "a brand new passphrase", confirm: "a brand new passphrase" }, { ip: "198.51.100.70" }),
+      );
+      expect(res.headers.get("location")).toBe(`/invite/${stale.token}?error=invalid`);
+      const login = await loginRoute.POST(post("/api/auth/login", { email: OTHER_EMAIL, password: OTHER_PASSWORD }, { ip: "198.51.100.71" }));
+      expect(login.headers.get("location")).toBe("/login?error=invalid");
 
-    const fresh = newInviteToken();
-    await admin.query(
-      `INSERT INTO auth.invites (token_hash, user_id, email, created_at, expires_at)
-       VALUES ($1, $2, $3, now() + interval '1 second', now() + interval '1 hour')`,
-      [fresh.hash, B, OTHER_EMAIL],
-    );
-    const back = await inviteRoute.POST(
-      post("/api/auth/invite", { token: fresh.token, password: OTHER_PASSWORD, confirm: OTHER_PASSWORD }, { ip: "198.51.100.72" }),
-    );
-    expect(back.headers.get("location")).toBe(`/invite/${fresh.token}?error=invalid`);
-    const sealed = await admin.query<{ sealed: boolean }>("SELECT disabled_at IS NOT NULL AS sealed FROM auth.accounts WHERE user_id=$1", [B]);
-    expect(sealed.rows.at(0)?.sealed).toBe(true);
+      const fresh = newInviteToken();
+      await admin.query(
+        `INSERT INTO auth.invites (token_hash, user_id, email, created_at, expires_at)
+         VALUES ($1, $2, $3, now() + interval '1 second', now() + interval '1 hour')`,
+        [fresh.hash, B, OTHER_EMAIL],
+      );
+      const back = await inviteRoute.POST(
+        post("/api/auth/invite", { token: fresh.token, password: OTHER_PASSWORD, confirm: OTHER_PASSWORD }, { ip: "198.51.100.72" }),
+      );
+      expect(back.headers.get("location")).toBe(`/invite/${fresh.token}?error=invalid`);
+      const sealed = await admin.query<{ sealed: boolean }>("SELECT disabled_at IS NOT NULL AS sealed FROM auth.accounts WHERE user_id=$1", [B]);
+      expect(sealed.rows.at(0)?.sealed).toBe(true);
+    } finally {
+      await admin.query("UPDATE auth.accounts SET disabled_at = NULL WHERE user_id = $1", [B]);
+    }
   });
 
   it("retires the session a browser held when it accepts an invite", async () => {
