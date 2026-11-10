@@ -36,7 +36,7 @@ function webUrl(raw: string): URL | null {
 
 export function readOAuthConfig(env: Env = process.env): OAuthSetting {
   if (env.PULS_MCP_OAUTH_SECRET) return { state: "invalid", problem: "PULS_MCP_OAUTH_SECRET is retired; use separate Ed25519 key files" };
-  if (viewerMode(env) !== "accounts") return { state: "off" };
+  try { viewerMode(env); } catch { return { state: "invalid", problem: "Personal accounts are required; remove retired access settings" }; }
   const privateFile = env.PULS_AUTH_PRIVATE_KEY_FILE ?? "";
   const publicFile = env.PULS_AUTH_PUBLIC_KEYS_FILE ?? "";
   const keyId = env.PULS_AUTH_KEY_ID ?? "";

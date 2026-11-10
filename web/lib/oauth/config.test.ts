@@ -26,8 +26,8 @@ describe("readOAuthConfig", () => {
     expect(Object.hasOwn(setting.config, "secret")).toBe(false);
   });
 
-  it("is off outside accounts mode or without any OAuth key and resource settings", () => {
-    expect(readOAuthConfig({ ...ON, WEB_ACCOUNTS: "false" }).state).toBe("off");
+  it("rejects retired modes and stays off without OAuth keys or resources", () => {
+    expect(readOAuthConfig({ ...ON, WEB_ACCOUNTS: "false" }).state).toBe("invalid");
     expect(readOAuthConfig({ WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: ON.WEB_PUBLIC_URL }).state).toBe("off");
   });
 

@@ -1,10 +1,9 @@
 // Server-only reporting calendar. Never cache one account's zone globally.
-import { configuredTimeZone } from "./config";
 import { scoped } from "./db";
 import { viewerMode } from "./mode";
 
 export async function reportingTimeZone(userId: string): Promise<string> {
-  if (viewerMode() !== "accounts") return configuredTimeZone();
+  viewerMode();
   const rows = await scoped(userId, (q) => q<{ zone: string }>(
     "SELECT puls_user_time_zone($1::uuid) AS zone", [userId],
   ));

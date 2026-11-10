@@ -50,8 +50,12 @@ async function proxy(req: NextRequest) {
 }
 
 describe("personal route headers", () => {
+  beforeEach(() => {
+    process.env.TRUST_PROXY_HEADERS = "true";
+    findSession.mockResolvedValue(SESSION);
+  });
   it("sends a nonce'd Content-Security-Policy and hands the nonce to the page", async () => {
-    const res = await proxy(request("/"));
+    const res = await proxy(request("/", { headers: viaProxy, cookie: `__Host-puls-session=${TOKEN}` }));
     const csp = res.headers.get("content-security-policy")!;
     const nonce = /'nonce-([^']+)'/.exec(csp)?.[1];
     expect(nonce).toBeTruthy();
@@ -59,7 +63,7 @@ describe("personal route headers", () => {
   });
 
   it("hands the page its path, overwriting any the client sent", async () => {
-    const req = request("/workouts");
+    const req = request("/workouts", { headers: viaProxy, cookie: `__Host-puls-session=${TOKEN}` });
     req.headers.set("x-puls-pathname", "/oauth/authorize");
     const res = await proxy(req);
     expect(res.headers.get("x-middleware-request-x-puls-pathname")).toBe("/workouts");

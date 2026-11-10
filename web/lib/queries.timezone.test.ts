@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryMock = vi.hoisted(() => vi.fn());
+// Fixed account calendar for these SQL-math tests, not an authorization proof.
+vi.mock("./reportingTimeZone", () => ({ reportingTimeZone: async () => process.env.PULS_TIME_ZONE || "UTC" }));
 // scoped() runs the callback's statements through the same mock; its
 // transaction and user setting are lib/db.ts's business, tested there.
 vi.mock("./db", () => ({
   query: queryMock,
-  healthQuery: (sql: string, params?: unknown[]) => sql.includes("has_table_privilege")
+  healthQuery: (sql: string, params?: unknown[]) => sql.includes("current_user AS role")
     ? Promise.resolve([{ role: "web_app", direct: false }]) : queryMock(sql, params),
   scoped: (_userId: string, fn: (q: typeof queryMock) => Promise<unknown>) => fn(queryMock),
 }));

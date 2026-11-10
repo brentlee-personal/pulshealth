@@ -4,14 +4,16 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryMock = vi.hoisted(() => vi.fn());
+const probeMock = vi.hoisted(() => vi.fn());
+// Calendar and SQL-math fixtures; actual isolation is tested against PostgreSQL.
+vi.mock("./reportingTimeZone", () => ({ reportingTimeZone: async () => process.env.PULS_TIME_ZONE || "UTC" }));
 // Every statement a scoped() callback issues, with the user it was scoped to.
 const scopedStatements = vi.hoisted(() => [] as { userId: string; sql: string }[]);
 // query() or scoped() called while a scoped() callback is running: each would
 // take a second pooled connection while the first is held (see lib/db.ts).
 const nested = vi.hoisted(() => ({ depth: 0, calls: [] as string[] }));
 vi.mock("./db", () => ({
-  healthQuery: (sql: string, params?: unknown[]) => sql.includes("has_table_privilege")
-    ? Promise.resolve([{ role: "web_app", direct: false }]) : queryMock(sql, params),
+  healthQuery: probeMock,
   query: (sql: string, params?: unknown[]) => {
     if (nested.depth > 0) nested.calls.push(sql);
     return queryMock(sql, params);
@@ -41,6 +43,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   queryMock.mockReset();
+  probeMock.mockReset().mockResolvedValue([{ role: "web_app", direct: false }]);
   scopedStatements.length = 0;
   nested.calls.length = 0;
   queryMock.mockImplementation((text: string) => {
@@ -385,7 +388,7 @@ describe("a failed read", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const { DataUnavailableError, getDataSource, getWorkouts, isDataUnavailable } = await import("./queries");
-      const probes = () => queryMock.mock.calls.filter(([sql]) => sql === "SELECT 1").length;
+      const probes = () => probeMock.mock.calls.length;
       expect((await getDataSource()).source).toBe("live");
       expect((await getDataSource()).source).toBe("live");
       expect(probes()).toBe(1); // cached between reads that succeed
@@ -409,6 +412,7 @@ describe("a failed read", () => {
 
       // The pool times out: so does the probe, and the source says so.
       queryMock.mockRejectedValue(new Error("timeout exceeded when trying to connect"));
+      probeMock.mockRejectedValue(new Error("timeout exceeded when trying to connect"));
       await expect(getWorkouts(USER_ID)).rejects.toBeInstanceOf(DataUnavailableError);
       expect(await getDataSource()).toEqual({ source: "error", detail: "Database unreachable" });
       // …and while it does, every read throws without trying the database.
@@ -417,6 +421,7 @@ describe("a failed read", () => {
       expect(queryMock).not.toHaveBeenCalled();
       // A transient outage does not poison every page for the live-cache TTL.
       queryMock.mockResolvedValue([]);
+      probeMock.mockResolvedValue([{ role: "web_app", direct: false }]);
       const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1001);
       try {
         expect((await getDataSource()).source).toBe("live");

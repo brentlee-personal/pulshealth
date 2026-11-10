@@ -14,10 +14,10 @@ describe("account reporting calendar", () => {
     expect(await reportingTimeZone("a")).toBe("Europe/Berlin");
     expect(scoped.mock.calls.map(([id]) => id)).toEqual(["a", "b", "a"]);
   });
-  it("retains the self-hosted configured calendar", async () => {
+  it("rejects the retired mode without using the global calendar", async () => {
     vi.stubEnv("WEB_ACCOUNTS", "false");
     vi.stubEnv("PULS_TIME_ZONE", "Asia/Tokyo");
-    expect(await reportingTimeZone("a")).toBe("Asia/Tokyo");
+    await expect(reportingTimeZone("a")).rejects.toThrow(/WEB_ACCOUNTS/);
     expect(scoped).not.toHaveBeenCalled();
   });
   it("does not silently substitute the global calendar on a failed account lookup", async () => {
