@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { ACCESS_TOKEN_SECONDS, OAUTH_SCOPE } from "./config";
 import { issueAccessToken, signAccessToken, verifyAccessToken } from "./jwt";
+import { CATALOG } from "../catalog";
 
 // The shared test vector (the MCP server's verifier tests against the same one).
 const oauthKeys = oauthKeyFixture();
@@ -54,6 +55,24 @@ describe("signAccessToken", () => {
 });
 
 describe("issueAccessToken", () => {
+  it("binds all selected catalog types and the authorization version in the signature", () => {
+    const config = { issuer: CLAIMS.iss, resource: CLAIMS.aud, ...oauthKeys };
+    const permissions = { operations: ["metrics:read"], record_types: CATALOG.map((type) => type.identifier),
+      time_range: { from: "2020-01-01T00:00:00Z", until: "2030-01-01T00:00:00Z" } } satisfies import("./permissions").ReadPermissions;
+    const grantId = "5ea4d000-0000-4000-8000-000000000003";
+    const issued = issueAccessToken(config, CLAIMS.sub, CLAIMS.client_id, CLAIMS.iat, { grantId, permissions, authorizationVersion: 7 });
+    const verified = verifyAccessToken(issued.token, config, CLAIMS.iat + 1);
+    expect(verified?.grant_id).toBe(grantId);
+    expect(verified?.principal).toEqual({ member_id: CLAIMS.sub, credential_id: grantId, credential_kind: "grant",
+      allowed_operations: permissions.operations, allowed_types: permissions.record_types, allowed_time_range: permissions.time_range, authorization_version: 7 });
+    expect(issued.token.length).toBeLessThanOrEqual(16_384);
+    const parts = issued.token.split(".");
+    const claims = decode(parts[1]);
+    claims.principal.allowed_operations.push("samples:read");
+    parts[1] = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    expect(verifyAccessToken(parts.join("."), config, CLAIMS.iat + 1)).toBeNull();
+  });
+
   it("issues 30-minute tokens for the configured issuer and audience, with a fresh jti", () => {
     const config = { issuer: "https://viewer.example.com", resource: "https://mcp.example.com/mcp", ...oauthKeys };
     const a = issueAccessToken(config, "5EA4D000-0000-4000-8000-000000000001", "pc_abc", 1_800_000_000);

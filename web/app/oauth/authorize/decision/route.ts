@@ -7,6 +7,7 @@ import { notFound } from "@/lib/oauth/http";
 import { oauthConfig } from "@/lib/oauth/config";
 import { createCode, findClient } from "@/lib/oauth/store";
 import { checkAuthorizeRequest, redirectWith } from "@/lib/oauth/validate";
+import { permissionsFromForm } from "@/lib/oauth/permissions";
 
 // The consent form's answer. The form posts to /oauth/authorize; proxy.ts
 // rewrites that POST to here after its same-origin check and with a live
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
   const params = new URLSearchParams();
   for (const [k, v] of form?.entries() ?? []) if (typeof v === "string") params.append(k, v);
   params.delete("decision");
+  for (const key of ["operation", "record_type", "from", "until"]) params.delete(key);
 
   try {
     const client = await findClient(params.get("client_id"));
@@ -51,10 +53,12 @@ export async function POST(request: NextRequest) {
     if (field(form, "decision") !== "allow") {
       return seeOtherAbsolute(redirectWith(req.redirectUri, { error: "access_denied", state: req.state, iss: config.issuer }));
     }
-    const code = await createCode(session.accountId, req);
+    const permissions = permissionsFromForm(form);
+    if (!permissions) return text(400, "Choose data types and a valid UTC time range. Raw data needs separate consent.");
+    const code = await createCode(session.accountId, req, permissions);
     return seeOtherAbsolute(redirectWith(req.redirectUri, { code, state: req.state, iss: config.issuer }));
-  } catch (e) {
-    console.error("[puls-web] oauth consent failed:", e instanceof Error ? e.message : e);
+  } catch {
+    console.error("[puls-web] oauth consent failed");
     return text(503, "Connecting the app failed on the server. Go back to the app and try again.");
   }
 }

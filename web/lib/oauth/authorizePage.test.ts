@@ -93,6 +93,12 @@ describe("the consent page", () => {
     expect(navigation.redirect).not.toHaveBeenCalled();
     expect(html).toContain("Connect Claude?");
     expect(html).toContain('action="/oauth/authorize"');
+    expect(html).toContain('name="record_type"');
+    expect(html).toContain('name="from"');
+    expect(html).toContain('name="until"');
+    expect(html).toMatch(/name="operation"[^>]*checked=""[^>]*value="metrics:read"/);
+    expect(html).not.toMatch(/name="operation"[^>]*checked=""[^>]*value="samples:read"/);
+    expect(html).not.toContain("read all health data");
   });
 
   it("offers the demo account no consent form, only a way to sign out", async () => {

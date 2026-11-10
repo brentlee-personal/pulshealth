@@ -140,7 +140,7 @@ accounts mode is the authorization server (`web/README.md`); this server is
 the resource server and still never touches the database. An access token is
 an Ed25519 JWT the viewer signs with its private key
 (`oauth.go`): fixed `alg=EdDSA`, `typ=at+jwt` and an active `kid`, at most
-4096 bytes, verified against its local public file, `iss` equal to the issuer,
+16384 bytes, verified against its local public file, `iss` equal to the issuer,
 `aud` equal to `PULS_MCP_URL`, `exp` not past and `iat` not ahead (60 s of
 skew each way), `sub` a lower-case UUID, `scope` containing `health:read`.
 Anything else is a 401 logged with the reason (never the token). It is

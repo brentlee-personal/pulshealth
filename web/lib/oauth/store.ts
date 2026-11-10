@@ -10,6 +10,7 @@ import { query, transaction, type QueryFn } from "../db";
 import { newToken, tokenHash } from "../accounts/session";
 import { CODE_SECONDS, REFRESH_TOKEN_DAYS } from "./config";
 import { type AuthorizeRequest, type ClientRegistration, type KnownClient, resourceMatches, verifyPkce } from "./validate";
+import { readPermissions, type ReadPermissions } from "./permissions";
 
 export interface StoredClient extends KnownClient {
   authMethod: "none" | "client_secret_post" | "client_secret_basic";
@@ -80,13 +81,13 @@ export function clientSecretMatches(client: StoredClient, secret: string | null)
  * allowed (5 minutes, single use). Returns the code, shown once in the
  * redirect.
  */
-export async function createCode(accountId: string, req: AuthorizeRequest): Promise<string> {
+export async function createCode(accountId: string, req: AuthorizeRequest, permissions: ReadPermissions): Promise<string> {
   const code = newToken();
   await transaction(async (q) => {
     await q(
-      `INSERT INTO auth.oauth_codes (id, client_id, account_id, redirect_uri, code_challenge, scope, resource, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8))`,
-      [tokenHash(code), req.clientId, accountId, req.redirectUri, req.codeChallenge, req.scope, req.resource, CODE_SECONDS],
+      `INSERT INTO auth.oauth_codes (id, client_id, account_id, redirect_uri, code_challenge, scope, resource, expires_at, permissions)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9)`,
+      [tokenHash(code), req.clientId, accountId, req.redirectUri, req.codeChallenge, req.scope, req.resource, CODE_SECONDS, JSON.stringify(permissions)],
     );
     await q("UPDATE auth.oauth_clients SET last_used_at = now() WHERE id = $1", [req.clientId]);
   });
@@ -100,6 +101,8 @@ export interface IssuedGrant {
   scope: string;
   refreshToken: string;
   resource?: string | null;
+  permissions: ReadPermissions;
+  authorizationVersion: number;
 }
 
 export type GrantFailure =
@@ -118,13 +121,14 @@ async function startGrant(
   clientId: string,
   scope: string,
   resource: string | null,
+  permissions: ReadPermissions,
 ): Promise<{ id: string; refreshToken: string }> {
   const refreshToken = newToken();
   const rows = await q<{ id: string }>(
-    `INSERT INTO auth.oauth_grants (account_id, client_id, scope, resource, refresh_hash, refresh_expires_at)
-     VALUES ($1, $2, $3, $4, $5, now() + make_interval(days => $6))
+    `INSERT INTO auth.oauth_grants (account_id, client_id, scope, resource, refresh_hash, refresh_expires_at, permissions)
+     VALUES ($1, $2, $3, $4, $5, now() + make_interval(days => $6), $7)
      RETURNING id::text`,
-    [accountId, clientId, scope, resource, tokenHash(refreshToken), REFRESH_TOKEN_DAYS],
+    [accountId, clientId, scope, resource, tokenHash(refreshToken), REFRESH_TOKEN_DAYS, JSON.stringify(permissions)],
   );
   await q("UPDATE auth.oauth_clients SET last_used_at = now() WHERE id = $1", [clientId]);
   return { id: rows[0].id, refreshToken };
@@ -165,8 +169,9 @@ export async function exchangeCode(input: {
       used: boolean;
       grant_id: string | null;
       account_ok: boolean;
+      permissions: unknown;
     }>(
-      `SELECT c.client_id, c.account_id::text, a.user_id::text, c.redirect_uri, c.code_challenge, c.scope, c.resource,
+      `SELECT c.client_id, c.account_id::text, a.user_id::text, c.redirect_uri, c.code_challenge, c.scope, c.resource, c.permissions,
               c.expires_at > now() AS live, c.used_at IS NOT NULL AS used, c.grant_id::text,
               a.disabled_at IS NULL AND a.password_hash IS NOT NULL AS account_ok
          FROM auth.oauth_codes c
@@ -177,6 +182,8 @@ export async function exchangeCode(input: {
     );
     const code = rows[0];
     if (!code) return { ok: false, error: "invalid_grant" } as const;
+    const permissions = readPermissions(code.permissions);
+    if (!permissions) return { ok: false, error: "invalid_grant" } as const;
     if (code.used) {
       if (code.client_id !== input.clientId) return { ok: false, error: "invalid_grant" } as const;
       if (code.grant_id) {
@@ -200,11 +207,11 @@ export async function exchangeCode(input: {
     if (!code.account_ok) return { ok: false, error: "invalid_grant" } as const;
 
     await q("UPDATE auth.oauth_codes SET used_at = now() WHERE id = $1", [id]);
-    const grant = await startGrant(q, code.account_id, code.client_id, code.scope, code.resource);
+    const grant = await startGrant(q, code.account_id, code.client_id, code.scope, code.resource, permissions);
     await q("UPDATE auth.oauth_codes SET grant_id = $2 WHERE id = $1", [id, grant.id]);
     return {
       ok: true,
-      grant: { grantId: grant.id, userId: code.user_id, scope: code.scope, resource: code.resource, refreshToken: grant.refreshToken },
+      grant: { grantId: grant.id, userId: code.user_id, scope: code.scope, resource: code.resource, refreshToken: grant.refreshToken, permissions, authorizationVersion: 1 },
     } as const;
   });
 }
@@ -227,8 +234,10 @@ export async function refreshGrant(input: { refreshToken: string; clientId: stri
       resource: string | null;
       live: boolean;
       account_ok: boolean;
+      permissions: unknown;
+      authorization_version: string;
     }>(
-      `SELECT g.id::text, g.client_id, a.user_id::text, g.scope, g.resource,
+      `SELECT g.id::text, g.client_id, a.user_id::text, g.scope, g.resource, g.permissions, g.authorization_version::text,
               g.revoked_at IS NULL AND g.refresh_expires_at > now() AS live,
               a.disabled_at IS NULL AND a.password_hash IS NOT NULL AS account_ok
          FROM auth.oauth_grants g
@@ -250,6 +259,9 @@ export async function refreshGrant(input: { refreshToken: string; clientId: stri
     if (grant.client_id !== input.clientId || !grant.live || !grant.account_ok) {
       return { ok: false, error: "invalid_grant" } as const;
     }
+    const permissions = readPermissions(grant.permissions);
+    const authorizationVersion = Number(grant.authorization_version);
+    if (!permissions || !Number.isSafeInteger(authorizationVersion) || authorizationVersion < 1) return { ok: false, error: "invalid_grant" } as const;
     if (!resourceMatches(input.resource, grant.resource ?? input.configuredResource ?? "")) {
       return { ok: false, error: "invalid_target" } as const;
     }
@@ -267,7 +279,7 @@ export async function refreshGrant(input: { refreshToken: string; clientId: stri
       [grant.id, tokenHash(refreshToken), REFRESH_TOKEN_DAYS],
     );
     await q("UPDATE auth.oauth_clients SET last_used_at = now() WHERE id = $1", [grant.client_id]);
-    return { ok: true, grant: { grantId: grant.id, userId: grant.user_id, scope: grant.scope, resource: grant.resource, refreshToken } } as const;
+    return { ok: true, grant: { grantId: grant.id, userId: grant.user_id, scope: grant.scope, resource: grant.resource, refreshToken, permissions, authorizationVersion } } as const;
   });
 }
 

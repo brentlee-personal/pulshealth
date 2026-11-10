@@ -98,7 +98,9 @@ export async function POST(request: NextRequest) {
     refundAll(tokenFailures, keys);
     const audience = result.grant.resource ?? config.resource;
     if (!oauthResources(config).includes(audience)) return oauthError(400, "invalid_target");
-    const access = issueAccessToken({ ...config, resource: audience }, result.grant.userId, client.id, undefined, audience === healthResource(config) ? result.grant.grantId : undefined);
+    const access = issueAccessToken({ ...config, resource: audience }, result.grant.userId, client.id, undefined, {
+      grantId: result.grant.grantId, permissions: result.grant.permissions, authorizationVersion: result.grant.authorizationVersion,
+    });
     return json(200, {
       access_token: access.token,
       token_type: "Bearer",

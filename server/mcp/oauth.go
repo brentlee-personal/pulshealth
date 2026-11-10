@@ -26,7 +26,7 @@ const (
 	// The one scope the viewer grants: read everything this server serves.
 	oauthScope = "health:read"
 	// Longest bearer the verifier will look at. A real token is ~450 bytes.
-	maxAccessTokenLen = 4096
+	maxAccessTokenLen = 16384
 	// Clock skew tolerated between the viewer and this process, on both exp
 	// and iat.
 	jwtLeeway = 60 * time.Second

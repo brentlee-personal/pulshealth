@@ -26,6 +26,8 @@ const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const VERIFIER = "v".repeat(20) + randomUUID().replace(/-/g, "");
 const CHALLENGE = createHash("sha256").update(VERIFIER).digest("base64url");
 
+const PERMISSIONS = { operations: ["metrics:read"], record_types: ["HKQuantityTypeIdentifierStepCount"], time_range: { from: "2020-01-01T00:00:00Z", until: "2030-01-01T00:00:00Z" } } satisfies import("./oauth/permissions").ReadPermissions;
+
 const PERSON = randomUUID();
 const OTHER = randomUUID();
 const ADMIN = randomUUID();
@@ -60,14 +62,14 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
   const exchange = (code: string, over: Record<string, unknown> = {}) =>
     oauth.exchangeCode({ code, clientId, redirectUri: REDIRECT, codeVerifier: VERIFIER, resource: null, configuredResource: MCP, ...over });
   const newGrant = async (account = accountId) => {
-    const r = await exchange(await oauth.createCode(account, request()));
+    const r = await exchange(await oauth.createCode(account, request(), PERMISSIONS));
     if (!r.ok) throw new Error(`exchange failed: ${r.error}`);
     return r.grant;
   };
 
   it("binds codes and refresh tokens to the consented resource", async () => {
     const resource = `${ISSUER}/api/health`;
-    const code = await oauth.createCode(accountId, request({ resource }));
+    const code = await oauth.createCode(accountId, request({ resource }), PERMISSIONS);
     const resources = [MCP, resource];
     const wrong = await exchange(code, { resource: MCP, configuredResource: resources });
     expect(wrong).toEqual({ ok: false, error: "invalid_target" });
@@ -79,6 +81,42 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     expect(switched).toEqual({ ok: false, error: "invalid_target" });
     const refreshed = await oauth.refreshGrant({ refreshToken: issued.grant.refreshToken, clientId, scope: null });
     expect(refreshed.ok && refreshed.grant.resource).toBe(resource);
+  });
+
+  it("stores explicit permissions and carries the current version through exchange and refresh", async () => {
+    const grant = await newGrant();
+    expect(grant.permissions).toEqual(PERMISSIONS);
+    expect(grant.authorizationVersion).toBe(1);
+    const narrowed = { ...PERMISSIONS, record_types: ["oura.sleep"], time_range: { from: "2026-01-01T00:00:00.000000001Z", until: "2026-01-01T00:00:00.000000002Z" } };
+    await admin.query("UPDATE auth.oauth_grants SET permissions=$2, authorization_version=authorization_version+1 WHERE id=$1", [grant.grantId, JSON.stringify(narrowed)]);
+    const refreshed = await oauth.refreshGrant({ refreshToken: grant.refreshToken, clientId, scope: null });
+    expect(refreshed.ok).toBe(true);
+    if (!refreshed.ok) throw new Error("refresh failed");
+    expect(refreshed.grant.permissions).toEqual(narrowed);
+    expect(refreshed.grant.authorizationVersion).toBe(2);
+  });
+
+  it("refuses legacy codes and grants without a personal scope", async () => {
+    const code = await oauth.createCode(accountId, request(), PERMISSIONS);
+    await admin.query("UPDATE auth.oauth_codes SET permissions=NULL WHERE id=$1", [(await import("./accounts/session")).tokenHash(code)]);
+    expect(await exchange(code)).toEqual({ ok: false, error: "invalid_grant" });
+    const grant = await newGrant();
+    await admin.query("UPDATE auth.oauth_grants SET permissions=NULL WHERE id=$1", [grant.grantId]);
+    expect(await oauth.refreshGrant({ refreshToken: grant.refreshToken, clientId, scope: null })).toEqual({ ok: false, error: "invalid_grant" });
+  });
+
+  it("enforces permission shape in the real database, not just the consent handler", async () => {
+    const grant = await newGrant();
+    for (const invalid of [
+      { ...PERMISSIONS, operations: ["data:delete"] }, { ...PERMISSIONS, operations: ["metrics:read", "metrics:read"] },
+      { ...PERMISSIONS, record_types: [] }, { ...PERMISSIONS, record_types: [null] }, { ...PERMISSIONS, record_types: ["x", "x"] },
+      { ...PERMISSIONS, record_types: ["测".repeat(257)] }, { ...PERMISSIONS, extra: "member" },
+      { ...PERMISSIONS, time_range: { from: "2026-02-30T00:00:00Z", until: "2027-01-01T00:00:00Z" } },
+      { ...PERMISSIONS, time_range: { from: "2026-01-01T24:00:00Z", until: "2027-01-01T00:00:00Z" } },
+      { ...PERMISSIONS, time_range: { from: "2026-01-01T00:00:00+00:00", until: "2027-01-01T00:00:00Z" } },
+      { ...PERMISSIONS, time_range: { from: "2027-01-01T00:00:00Z", until: "2026-01-01T00:00:00Z" } },
+    ]) await expect(admin.query("UPDATE auth.oauth_grants SET permissions=$2 WHERE id=$1", [grant.grantId, JSON.stringify(invalid)])).rejects.toMatchObject({ code: "23514" });
+    expect((await admin.query("SELECT permissions FROM auth.oauth_grants WHERE id=$1", [grant.grantId])).rows[0].permissions).toEqual(PERMISSIONS);
   });
 
   beforeAll(async () => {
@@ -134,7 +172,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
   });
 
   it("exchanges a code once; a replay revokes the grant it made", async () => {
-    const code = await oauth.createCode(accountId, request());
+    const code = await oauth.createCode(accountId, request(), PERMISSIONS);
     const first = await exchange(code, { resource: `${MCP}/` });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
@@ -152,7 +190,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
   });
 
   it("never exchanges for the wrong verifier, redirect URI, client or resource, and those leave the code usable", async () => {
-    const code = await oauth.createCode(accountId, request({ redirectUri: "http://localhost:4242/callback" }));
+    const code = await oauth.createCode(accountId, request({ redirectUri: "http://localhost:4242/callback" }), PERMISSIONS);
     expect((await exchange(code, { redirectUri: "http://localhost:4242/callback", codeVerifier: `${VERIFIER}x` })).ok).toBe(false);
     expect((await exchange(code, { redirectUri: "http://localhost:4243/callback" })).ok).toBe(false);
     expect((await exchange(code, { redirectUri: "http://localhost:4242/callback", clientId: "pc_BBBBBBBBBBBBBBBBBBBBBBBB" })).ok).toBe(false);
@@ -163,7 +201,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
   });
 
   it("refuses an expired code", async () => {
-    const code = await oauth.createCode(accountId, request());
+    const code = await oauth.createCode(accountId, request(), PERMISSIONS);
     await admin.query("UPDATE auth.oauth_codes SET expires_at = now() - interval '1 second' WHERE account_id = $1 AND used_at IS NULL", [accountId]);
     expect((await exchange(code)).ok).toBe(false);
   });
@@ -214,7 +252,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     const grant = await newGrant(otherAccountId);
     await admin.query("UPDATE auth.accounts SET disabled_at = now() WHERE id = $1", [otherAccountId]);
     expect((await oauth.refreshGrant({ refreshToken: grant.refreshToken, clientId, scope: null })).ok).toBe(false);
-    const code = await oauth.createCode(otherAccountId, request());
+    const code = await oauth.createCode(otherAccountId, request(), PERMISSIONS);
     expect((await exchange(code)).ok).toBe(false);
     await admin.query("UPDATE auth.accounts SET disabled_at = NULL, password_hash = NULL WHERE id = $1", [otherAccountId]);
     expect((await oauth.refreshGrant({ refreshToken: grant.refreshToken, clientId, scope: null })).ok).toBe(false);
@@ -246,7 +284,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
 
   it("revokes every grant on a password change, and unused codes with them", async () => {
     const grant = await newGrant();
-    const pending = await oauth.createCode(accountId, request());
+    const pending = await oauth.createCode(accountId, request(), PERMISSIONS);
     const { changePassword } = await import("./accounts/store");
     await changePassword(accountId, "scrypt$y");
     expect((await grantRow(grant.grantId)).revoked).toBe(true);
@@ -265,7 +303,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
 
   it("drives the token endpoint end to end", async () => {
     const { POST } = await import("@/app/oauth/token/route");
-    const code = await oauth.createCode(accountId, request());
+    const code = await oauth.createCode(accountId, request(), PERMISSIONS);
     const call = (fields: Record<string, string>) =>
       POST(
         new NextRequest(new URL("/oauth/token", "http://web:3000"), {
@@ -279,6 +317,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     const body = await res.json();
     const claims = JSON.parse(Buffer.from(body.access_token.split(".")[1], "base64url").toString());
     expect(claims).toMatchObject({ iss: ISSUER, aud: MCP, sub: PERSON, client_id: clientId, scope: "health:read" });
+    expect(claims.principal).toEqual({ member_id: PERSON, credential_id: claims.grant_id, credential_kind: "grant", allowed_operations: PERMISSIONS.operations,
+      allowed_types: PERMISSIONS.record_types, allowed_time_range: PERMISSIONS.time_range, authorization_version: 1 });
     expect(claims.exp - claims.iat).toBe(1800);
     const replay = await call({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, code_verifier: VERIFIER, client_id: clientId });
     expect(replay.status).toBe(400);

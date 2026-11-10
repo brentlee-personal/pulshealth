@@ -8,6 +8,7 @@ import { oauthConfig } from "@/lib/oauth/config";
 import { findClient } from "@/lib/oauth/store";
 import { checkAuthorizeRequest, redirectWith } from "@/lib/oauth/validate";
 import { currentSession } from "@/lib/viewer";
+import { CATALOG } from "@/lib/catalog";
 
 // The authorization endpoint's consent page (OAuth on, accounts mode only).
 // proxy.ts has already sent anyone without a session to /login, which comes
@@ -93,6 +94,8 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
 
   const req = check.request;
   const name = req.clientName || "An unnamed app";
+  const until = new Date();
+  const from = new Date(until.getTime() - 30 * 86400_000);
   return (
     <div style={{ display: "grid", placeItems: "center", padding: "32px 0" }}>
       <AuthCard title={`Connect ${name}?`} subtitle={<>Signed in as {session.email}.</>}>
@@ -103,15 +106,31 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
           <span className="mono">{destination(req.redirectUri)}</span>.
         </p>
         <div className="panel" style={{ padding: "12px 14px", marginBottom: 14, fontSize: 13.5, lineHeight: 1.55 }}>
-          It will be able to <strong style={{ fontWeight: 600 }}>read all health data on this account</strong>, including
-          your profile — name, date of birth — until you revoke it. Read-only: it cannot change or delete anything.
+          Choose the data types and UTC time range below. Summaries are selected by default.
+          Raw samples need a separate choice. Your profile is not shared. The app cannot change or delete data.
         </div>
         <p className="form-hint" style={{ margin: "0 0 18px", lineHeight: 1.5 }}>
           Revoke it any time under Connected apps on your <a href="/account" style={{ textDecoration: "underline" }}>account
-          page</a>. Home Assistant health API access stops immediately; AI assistant access expires within
-          30 minutes. Only allow an app you just asked to connect.
+          page</a>. Only allow an app you just asked to connect.
         </p>
         <form method="post" action="/oauth/authorize">
+          <fieldset style={{ marginBottom: 14 }}>
+            <legend>Read access</legend>
+            <label style={{ display: "block" }}><input type="checkbox" name="operation" value="metrics:read" defaultChecked /> Summaries</label>
+            <label style={{ display: "block" }}><input type="checkbox" name="operation" value="samples:read" /> Raw samples</label>
+          </fieldset>
+          <fieldset style={{ marginBottom: 14, maxHeight: 220, overflow: "auto" }}>
+            <legend>Data types</legend>
+            {CATALOG.map((type) => <label key={type.identifier} style={{ display: "block" }}>
+              <input type="checkbox" name="record_type" value={type.identifier} /> {type.name}
+            </label>)}
+          </fieldset>
+          <label style={{ display: "block", marginBottom: 10 }}>From, UTC
+            <input type="datetime-local" name="from" step="1" required defaultValue={from.toISOString().slice(0, 19)} />
+          </label>
+          <label style={{ display: "block", marginBottom: 14 }}>Until, UTC, excluded
+            <input type="datetime-local" name="until" step="1" required defaultValue={until.toISOString().slice(0, 19)} />
+          </label>
           <input type="hidden" name="client_id" value={req.clientId} />
           <input type="hidden" name="redirect_uri" value={req.redirectUri} />
           <input type="hidden" name="response_type" value="code" />

@@ -28,6 +28,7 @@ const CLIENT_ID = "pc_AAAAAAAAAAAAAAAAAAAAAAAA";
 const USER = "5ea4d000-0000-4000-8000-000000000001";
 const CHALLENGE = "p_j-Nj_Xa-C0MOoCl6lv9UzGgSvHUvKaouTlEnyXOiE";
 const TOKEN = "R".repeat(43);
+const PERMISSIONS = { operations: ["metrics:read"], record_types: ["HKQuantityTypeIdentifierStepCount"], time_range: { from: "2020-01-01T00:00:00Z", until: "2030-01-01T00:00:00Z" } } satisfies import("./permissions").ReadPermissions;
 const PUBLIC_CLIENT = {
   id: CLIENT_ID,
   name: "Claude",
@@ -225,7 +226,7 @@ describe("token endpoint", () => {
   const exchange = { grant_type: "authorization_code", code: TOKEN, redirect_uri: "https://claude.ai/api/mcp/auth_callback", code_verifier: "v".repeat(43), client_id: CLIENT_ID };
 
   it("exchanges a code for a signed access token and a refresh token", async () => {
-    store.exchangeCode.mockResolvedValue({ ok: true, grant: { grantId: "g", userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.exchangeCode.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
     const { POST } = await import("@/app/oauth/token/route");
     const res = await POST(tokenReq({ ...exchange, resource: MCP }));
     expect(res.status).toBe(200);
@@ -282,7 +283,7 @@ describe("token endpoint", () => {
     const { tokenHash } = await import("../accounts/session");
     const secret = "S".repeat(43);
     store.findClient.mockResolvedValue({ ...PUBLIC_CLIENT, authMethod: "client_secret_basic", secretHash: tokenHash(secret) });
-    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "g", userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
     const { POST } = await import("@/app/oauth/token/route");
     const refresh = { grant_type: "refresh_token", refresh_token: TOKEN };
 
@@ -303,7 +304,7 @@ describe("token endpoint", () => {
   });
 
   it("rotates on refresh and refuses a scope the grant does not hold", async () => {
-    store.refreshGrant.mockResolvedValueOnce({ ok: true, grant: { grantId: "g", userId: USER, scope: "health:read", refreshToken: "N".repeat(43) } });
+    store.refreshGrant.mockResolvedValueOnce({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: "N".repeat(43) } });
     store.refreshGrant.mockResolvedValueOnce({ ok: false, error: "invalid_scope" });
     const { POST } = await import("@/app/oauth/token/route");
     const ok = await POST(tokenReq({ grant_type: "refresh_token", refresh_token: TOKEN, client_id: CLIENT_ID }));
@@ -325,7 +326,7 @@ describe("token endpoint", () => {
   it("charges failures to the address, refunds successes and server errors", async () => {
     const { POST } = await import("@/app/oauth/token/route");
     const ip = freshIp();
-    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "g", userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
     for (let i = 0; i < 100; i++) {
       expect((await POST(tokenReq({ grant_type: "refresh_token", refresh_token: TOKEN, client_id: CLIENT_ID }, { ip }))).status).toBe(200);
     }
@@ -385,6 +386,7 @@ describe("revocation", () => {
 describe("the consent decision", () => {
   const SESSION = { id: Buffer.alloc(32, 7), accountId: "acc-1", userId: USER, email: "a@example.com", isAdmin: false, selfService: true, refreshed: false };
   const consent = {
+    operation: "metrics:read", record_type: "HKQuantityTypeIdentifierStepCount", from: "2020-01-01T00:00:00", until: "2030-01-01T00:00:00",
     client_id: CLIENT_ID,
     redirect_uri: "https://claude.ai/api/mcp/auth_callback",
     response_type: "code",
@@ -413,7 +415,7 @@ describe("the consent decision", () => {
     const loc = new URL(res.headers.get("location")!);
     expect(`${loc.origin}${loc.pathname}`).toBe(consent.redirect_uri);
     expect(Object.fromEntries(loc.searchParams)).toEqual({ code: "C".repeat(43), state: "st", iss: ISSUER });
-    expect(store.createCode).toHaveBeenCalledWith("acc-1", expect.objectContaining({ clientId: CLIENT_ID, codeChallenge: CHALLENGE, resource: MCP }));
+    expect(store.createCode).toHaveBeenCalledWith("acc-1", expect.objectContaining({ clientId: CLIENT_ID, codeChallenge: CHALLENGE, resource: MCP }), PERMISSIONS);
   });
 
   it("answers access_denied on Deny, and issues nothing", async () => {
@@ -421,6 +423,18 @@ describe("the consent decision", () => {
     const { POST } = await import("@/app/oauth/authorize/decision/route");
     const res = await POST(decide({ ...consent, decision: "deny" }));
     expect(Object.fromEntries(new URL(res.headers.get("location")!).searchParams)).toEqual({ error: "access_denied", state: "st", iss: ISSUER });
+    expect(store.createCode).not.toHaveBeenCalled();
+  });
+
+  it("requires personal type and time choices before issuing a code", async () => {
+    sessions.findSession.mockResolvedValue(SESSION);
+    const { POST } = await import("@/app/oauth/authorize/decision/route");
+    for (const bad of [
+      { ...consent, record_type: "", decision: "allow" },
+      { ...consent, operation: "data:delete", decision: "allow" },
+      { ...consent, from: "2026-02-30T00:00:00", decision: "allow" },
+      { ...consent, until: "2019-01-01T00:00:00", decision: "allow" },
+    ]) expect((await POST(decide(bad))).status).toBe(400);
     expect(store.createCode).not.toHaveBeenCalled();
   });
 
