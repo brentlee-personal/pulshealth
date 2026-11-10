@@ -24,6 +24,36 @@ const CLAIMS = {
 const decode = (part: string) => JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 
 describe("signAccessToken", () => {
+  it("signs the fixed personal API assertion used by the Go verifier", () => {
+    const claims = {
+      "iss": "https://viewer.example.com",
+      "aud": "family-health-api",
+      "sub": "5ea4d000-0000-4000-8000-000000000001",
+      "client_id": "pc_test",
+      "iat": 1790000000,
+      "exp": 1790000060,
+      "jti": "5ea4d000-0000-4000-8000-000000000002",
+      "grant_id": "5ea4d000-0000-4000-8000-000000000003",
+      "principal": {
+        "member_id": "5ea4d000-0000-4000-8000-000000000001",
+        "credential_id": "5ea4d000-0000-4000-8000-000000000002",
+        "allowed_types": [
+          "HKQuantityTypeIdentifierStepCount"
+        ],
+        "allowed_time_range": {
+          "from": "2026-01-01T00:00:00.000000001Z",
+          "until": "2026-02-01T00:00:00Z"
+        },
+        "authorization_version": 1,
+        "credential_kind": "exchange",
+        "allowed_operations": [
+          "metrics:read"
+        ]
+      }
+    } satisfies import("./jwt").APIAssertionClaims;
+    expect(signAccessToken(claims, oauthKeys.signingKey)).toBe("eyJhbGciOiJFZERTQSIsInR5cCI6ImF0K2p3dCIsImtpZCI6InJmYzgwMzItdGVzdC0xIn0.eyJpc3MiOiJodHRwczovL3ZpZXdlci5leGFtcGxlLmNvbSIsImF1ZCI6ImZhbWlseS1oZWFsdGgtYXBpIiwic3ViIjoiNWVhNGQwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiY2xpZW50X2lkIjoicGNfdGVzdCIsImlhdCI6MTc5MDAwMDAwMCwiZXhwIjoxNzkwMDAwMDYwLCJqdGkiOiI1ZWE0ZDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJncmFudF9pZCI6IjVlYTRkMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsInByaW5jaXBhbCI6eyJtZW1iZXJfaWQiOiI1ZWE0ZDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJjcmVkZW50aWFsX2lkIjoiNWVhNGQwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiYWxsb3dlZF90eXBlcyI6WyJIS1F1YW50aXR5VHlwZUlkZW50aWZpZXJTdGVwQ291bnQiXSwiYWxsb3dlZF90aW1lX3JhbmdlIjp7ImZyb20iOiIyMDI2LTAxLTAxVDAwOjAwOjAwLjAwMDAwMDAwMVoiLCJ1bnRpbCI6IjIwMjYtMDItMDFUMDA6MDA6MDBaIn0sImF1dGhvcml6YXRpb25fdmVyc2lvbiI6MSwiY3JlZGVudGlhbF9raW5kIjoiZXhjaGFuZ2UiLCJhbGxvd2VkX29wZXJhdGlvbnMiOlsibWV0cmljczpyZWFkIl19fQ.sWyBGrw60ZzqW8YGvB4oI7ZCI2jGdXl7eg1ZMRXvlaIcVeMjEPuX7d1EIRMJpnT7TyTsCwSixGM6MSzf1YQ2DQ");
+  });
+
   it("reproduces the contract's test vector byte for byte", () => {
     expect(signAccessToken(CLAIMS, oauthKeys.signingKey)).toBe(VECTOR);
   });
