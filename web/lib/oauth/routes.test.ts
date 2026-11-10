@@ -461,7 +461,12 @@ describe("the consent decision", () => {
       const location = res.headers.get("location")!;
       expect(location.startsWith("/oauth/authorize?")).toBe(true);
       const back = new URLSearchParams(location.slice("/oauth/authorize?".length));
-      expect(Object.fromEntries(back)).toEqual({ ...consent, ...bad });
+      const expected = new URLSearchParams({ ...consent, ...bad });
+      for (const key of ["operation", "record_type", "from", "until"]) {
+        expected.delete(key);
+        expect(back.has(key)).toBe(false);
+      }
+      expect(Object.fromEntries(back)).toEqual(Object.fromEntries(expected));
     }
     expect(store.createCode).not.toHaveBeenCalled();
   });
