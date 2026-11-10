@@ -63,8 +63,7 @@ describe("controlled Ed25519 keys", () => {
     const original = readFileSync(paths.privateFile);
     const publicKeys = readPublicKeys(paths.publicFile);
     expect(() => readSigningKey(paths.privateFile, "unknown", publicKeys)).toThrow("PULS_AUTH_KEY_ID");
-    for (const algorithm of ["ed25519", "ed448"] as const) {
-      const pair = generateKeyPairSync(algorithm);
+    for (const pair of [generateKeyPairSync("ed25519"), generateKeyPairSync("ed448")]) {
       writeFileSync(paths.privateFile, pair.privateKey.export({ type: "pkcs8", format: "pem" }));
       expect(() => readSigningKey(paths.privateFile, publicJwk.kid, publicKeys)).toThrow("PULS_AUTH_PRIVATE_KEY_FILE");
     }
