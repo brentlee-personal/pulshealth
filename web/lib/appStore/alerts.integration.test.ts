@@ -4,16 +4,18 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { requireIntegrationDatabases } from "../integrationEnv";
+import { secretFixture } from "../secretFixture";
 const mail = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock("../email", () => ({ mailConfig: () => ({ from: "alerts@example.com" }), sendMail: mail.send }));
 const dbs = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: dbs.webUrl });
 
 describe.skipIf(!dbs.available)("App Store delivery receipts in Postgres", () => {
   const key = randomBytes(32);
   let admin: Client;
   let deliver: typeof import("./alerts").deliverAlert;
   beforeAll(async () => {
-    vi.stubEnv("DATABASE_URL", dbs.webUrl!);
+    vi.stubEnv("DATABASE_URL_FILE", databaseSecret.DATABASE_URL_FILE);
     vi.stubEnv("WEB_APP_STORE_ALERT_TO", "operator@example.com");
     admin = new Client({ connectionString: dbs.adminUrl });
     await admin.connect();
