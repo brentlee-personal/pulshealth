@@ -300,6 +300,7 @@ func TestCatalogTypesServesStaleWhileOneRefreshRuns(t *testing.T) {
 
 // ageCatalog moves user's cached catalog age into the past.
 func ageCatalog(srv *Server, user string, age time.Duration) {
+	user = catalogKey(user, [32]byte{})
 	srv.catalogMu.Lock()
 	defer srv.catalogMu.Unlock()
 	entry := srv.catalog[user]

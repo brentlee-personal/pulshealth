@@ -52,6 +52,10 @@ to the pool, including after request cancellation. Health aggregates use
 scoped raw inputs. Unverified legacy profile and activity-day facts remain
 sealed. This does not erase their stored records.
 
+Catalog caches are keyed by member and opaque credential hash. Two credentials
+for one member cannot share results. Background refreshes open a fresh scoped
+transaction and recheck live authority before reading.
+
 Integration authorization tests use real api_reader connections, signatures
 and HTTP. Legacy calendar and SQL math tests use the separate read-only
 grafana reference role through REFERENCE_DATABASE_URL. They do not prove

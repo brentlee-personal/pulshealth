@@ -110,9 +110,7 @@ type Server struct {
 	// request rate cannot drive pool acquisitions (see health.go).
 	health healthCache
 
-	// /v1/catalog/types per user (see catalogCache): the query counts every
-	// row the user has, so it is cached briefly, and it is cached per user
-	// because the answer is per user.
+	// Catalog results belong to one member and one immutable API credential.
 	catalogMu sync.Mutex
 	catalog   map[string]catalogEntry
 
@@ -540,9 +538,11 @@ func (s *Server) handleCatalogTypes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := s.requestUser(r)
-	if types, stale, ok := s.cachedCatalogTypes(user, time.Now()); ok {
+	authority := r.Context().Value(apiAuthorityKey{}).(*apiAuthority)
+	key := catalogKey(user, authority.TokenHash)
+	if types, stale, ok := s.cachedCatalogTypes(key, time.Now()); ok {
 		if stale {
-			s.refreshCatalogTypes(user)
+			s.refreshCatalogTypes(user, key, authority)
 		}
 		writeJSON(w, http.StatusOK, map[string][]CatalogType{"types": types})
 		return
@@ -554,7 +554,7 @@ func (s *Server) handleCatalogTypes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	types = cloneCatalogTypes(types)
-	s.storeCatalogTypes(user, types)
+	s.storeCatalogTypes(key, types)
 	writeJSON(w, http.StatusOK, map[string][]CatalogType{"types": types})
 }
 
@@ -1059,7 +1059,7 @@ func (s *Server) cachedCatalogTypes(user string, now time.Time) (types []Catalog
 // which ends as soon as the stale answer is written — bounded by
 // catalogRefreshTimeout and the server's lifetime. A failure keeps the stale
 // answer and is logged.
-func (s *Server) refreshCatalogTypes(user string) {
+func (s *Server) refreshCatalogTypes(user, key string, authority *apiAuthority) {
 	s.catalogMu.Lock()
 	if s.catalogRefreshing {
 		s.catalogMu.Unlock()
@@ -1073,9 +1073,14 @@ func (s *Server) refreshCatalogTypes(user string) {
 		defer s.catalogRefreshes.Done()
 		ctx, cancel := context.WithTimeout(s.lifetimeContext(), catalogRefreshTimeout)
 		defer cancel()
-		types, err := s.store.CatalogTypes(ctx, user)
+		ctx, closeScope, err := s.store.ReadScope(ctx, authority)
+		var types []CatalogType
 		if err == nil {
-			s.storeCatalogTypes(user, cloneCatalogTypes(types))
+			defer closeScope()
+			types, err = s.store.CatalogTypes(ctx, user)
+		}
+		if err == nil {
+			s.storeCatalogTypes(key, cloneCatalogTypes(types))
 		} else {
 			s.log.Warn("catalog types refresh failed; serving the cached answer", "err", err.Error())
 		}
@@ -1085,11 +1090,11 @@ func (s *Server) refreshCatalogTypes(user string) {
 	}()
 }
 
-// storeCatalogTypes caches one user's answer. The map is bounded at
-// catalogCacheMaxUsers because an authenticated caller can spray ?user=
-// values (with PULS_MULTI_USER on, any UUID is a valid selector); at the
-// bound, entries past their stale window go first, then the one expiring
-// soonest.
+func catalogKey(user string, hash [32]byte) string {
+	return fmt.Sprintf("%s:%x", strings.ToLower(user), hash)
+}
+
+// Bound credential entries, evicting expired entries before the oldest live one.
 func (s *Server) storeCatalogTypes(user string, types []CatalogType) {
 	s.catalogMu.Lock()
 	defer s.catalogMu.Unlock()
