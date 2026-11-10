@@ -242,17 +242,13 @@ services:
       # Deliberately not the API's PULS_USER_ID: pinning to that would make
       # the connector unable to read anyone else even with the gate open.
       PULS_USER_ID: ${PULS_MCP_USER_ID:-}
-      # Optional OAuth sign-in for hosted connectors (claude.ai, the Claude
-      # mobile app, Claude Code's /mcp), alongside PULS_MCP_TOKEN. The viewer
-      # in accounts mode is the authorization server and signs 30-minute
-      # access tokens with PULS_MCP_OAUTH_SECRET; this service checks them
-      # locally (still no database) and reads only as the signed-in person.
-      # On when the secret and PULS_MCP_URL (this server's public URL, path
-      # included) are set; the issuer is the viewer's WEB_PUBLIC_URL. Empty,
-      # nothing changes. See docs/ai.md, "Hosted connectors (OAuth)".
+      # OAuth verifier: public keys only. The old secret is passed only to reject obsolete configuration.
       PULS_MCP_OAUTH_SECRET: ${PULS_MCP_OAUTH_SECRET:-}
+      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-}
       PULS_MCP_URL: ${PULS_MCP_URL:-}
       PULS_MCP_OAUTH_ISSUER: ${PULS_MCP_OAUTH_ISSUER:-${WEB_PUBLIC_URL:-}}
+    volumes:
+      - auth_public:/auth-public:ro
     ports:
       # Loopback only: the token grants read access to the health data, so
       # publish it only through an HTTPS proxy, like the API (e.g.
@@ -334,11 +330,12 @@ services:
       # sample data (`make web-demo` creates the account). Unset, /demo is a
       # 404. See web/README.md, "Demo account".
       WEB_DEMO_USER: ${WEB_DEMO_USER:-}
-      # Accounts mode only: the viewer is the OAuth authorization server for
-      # the MCP server's hosted connectors, signing access tokens for
-      # PULS_MCP_URL with PULS_MCP_OAUTH_SECRET (the same two values the mcp
-      # service gets). Unset, every OAuth path is a 404. See docs/ai.md.
+      # Only the authorization signer mounts the private volume.
+      # The deprecated shared variable is rejected when nonempty.
       PULS_MCP_OAUTH_SECRET: ${PULS_MCP_OAUTH_SECRET:-}
+      PULS_AUTH_PRIVATE_KEY_FILE: ${PULS_AUTH_PRIVATE_KEY_FILE:-}
+      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-}
+      PULS_AUTH_KEY_ID: ${PULS_AUTH_KEY_ID:-}
       PULS_MCP_URL: ${PULS_MCP_URL:-}
       # Used only inside the authenticated, account-scoped public health gateway.
       PULS_API_URL: http://api:8081
@@ -348,6 +345,8 @@ services:
       PULS_DELETION_LEDGER_DIR: ${PULS_DELETION_LEDGER_DIR:-}
     volumes:
       - ${PULS_DELETION_LEDGER_VOLUME:-deletion_ledger}:/deletion-ledger
+      - auth_signing:/auth-keys
+      - auth_public:/auth-public
     ports:
       # 3000 is Grafana. Default to loopback; to reach the viewer from other
       # machines set WEB_BIND_ADDR to a private interface, e.g. the host's
@@ -496,6 +495,8 @@ services:
         condition: service_healthy
 
 volumes:
+  auth_signing:
+  auth_public:
   db_data:
   grafana_data:
   # Only created when the `backup` profile is used and PULS_BACKUP_DIR is unset.

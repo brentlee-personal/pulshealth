@@ -88,7 +88,7 @@ mode, pointed at `http://api:8081` over the internal network.
 | `PULS_API_URL` | Base URL of the product API. Default `http://127.0.0.1:8081`; Compose sets `http://api:8081`. |
 | `PULS_API_TOKEN` | The product API's bearer token (`PULS_API_TOKEN` in `server/.env`). Required. |
 | `PULS_MCP_TOKEN` | The static bearer token MCP clients may present to `/mcp` in `--http` mode. Required in that mode unless OAuth is on, and refused if still `.env.example`'s `change-me`; ignored in stdio mode. |
-| `PULS_MCP_OAUTH_SECRET` | OAuth (below): the HMAC-SHA256 key the web viewer signs access tokens with. At least 32 characters, never `change-me`. |
+| `PULS_AUTH_PUBLIC_KEYS_FILE` | Local public-only Ed25519 JWKS. Private signing files are refused. See [Signing keys](../../docs/auth-keys.md). |
 | `PULS_MCP_URL` | OAuth: this server's public URL, path included (`https://mcp.example.com/mcp`) — the resource identifier, and the only `aud` a token may carry. https, or http for a loopback host. |
 | `PULS_MCP_OAUTH_ISSUER` | OAuth: the authorization server's issuer, the viewer's public origin (its `WEB_PUBLIC_URL`; Compose passes that). OAuth is on when the secret or the URL is set, and then all three are required — a partial setting stops startup. The issuer alone leaves OAuth off. |
 | `PULS_TIME_ZONE` | Legacy fallback IANA zone. A selected user's `timeZone` from `GET /v1/users?user=...` takes precedence, including for OAuth callers. The selected user’s zone is refreshed for every incoming tool, resource, or prompt request and reused only within that request. For older APIs without per-user zones, an explicit setting wins; otherwise the API's top-level `timeZone` is used, falling back to UTC when absent. |
@@ -138,9 +138,9 @@ Clients that use account sign-in connect through OAuth. This includes the
 hosted PulsHealth connection and Claude Code's `/mcp` authentication flow. The web viewer in
 accounts mode is the authorization server (`web/README.md`); this server is
 the resource server and still never touches the database. An access token is
-an HS256 JWT the viewer signs with `PULS_MCP_OAUTH_SECRET`
-(`oauth.go`): header exactly `{"alg":"HS256","typ":"at+jwt"}`, at most
-4096 bytes, signature compared in constant time, `iss` equal to the issuer,
+an Ed25519 JWT the viewer signs with its private key
+(`oauth.go`): fixed `alg=EdDSA`, `typ=at+jwt` and an active `kid`, at most
+4096 bytes, verified against its local public file, `iss` equal to the issuer,
 `aud` equal to `PULS_MCP_URL`, `exp` not past and `iat` not ahead (60 s of
 skew each way), `sub` a lower-case UUID, `scope` containing `health:read`.
 Anything else is a 401 logged with the reason (never the token). It is

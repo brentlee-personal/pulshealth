@@ -1,13 +1,10 @@
 import { isUuid } from "../uuid";
-// The MCP server's access tokens: compact JWTs, HS256, header exactly
-// {"alg":"HS256","typ":"at+jwt"}, claims in a fixed order. The MCP server
-// (server/mcp) verifies them with the same PULS_MCP_OAUTH_SECRET and never
-// asks the database, so they are short-lived (ACCESS_TOKEN_SECONDS). Both
-// sides test against the same vector (jwt.test.ts). node:crypto only.
+// Fixed Ed25519 access tokens. Verification accepts only a configured public key.
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, sign, verify } from "node:crypto";
 
 import { ACCESS_TOKEN_SECONDS, OAUTH_SCOPE, type OAuthConfig } from "./config";
+import { type SigningKey } from "./keys";
 
 export interface AccessTokenClaims {
   iss: string;
@@ -21,10 +18,12 @@ export interface AccessTokenClaims {
   grant_id?: string;
 }
 
-const HEADER = Buffer.from(JSON.stringify({ alg: "HS256", typ: "at+jwt" })).toString("base64url");
+function header(keyId: string): string {
+  return Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "at+jwt", kid: keyId })).toString("base64url");
+}
 
 /** Signs `claims`, serialised in the contract's key order whatever order they came in. */
-export function signAccessToken(claims: AccessTokenClaims, secret: string): string {
+export function signAccessToken(claims: AccessTokenClaims, key: SigningKey): string {
   const ordered = {
     iss: claims.iss,
     aud: claims.aud,
@@ -37,8 +36,8 @@ export function signAccessToken(claims: AccessTokenClaims, secret: string): stri
     ...(claims.grant_id ? { grant_id: claims.grant_id } : {}),
   };
   const payload = Buffer.from(JSON.stringify(ordered)).toString("base64url");
-  const input = `${HEADER}.${payload}`;
-  const signature = createHmac("sha256", Buffer.from(secret, "utf8")).update(input).digest("base64url");
+  const input = `${header(key.id)}.${payload}`;
+  const signature = sign(null, Buffer.from(input), key.privateKey).toString("base64url");
   return `${input}.${signature}`;
 }
 
@@ -62,19 +61,20 @@ export function issueAccessToken(
       jti: randomBytes(16).toString("base64url"),
       ...(grantId ? { grant_id: grantId } : {}),
     },
-    config.secret,
+    config.signingKey,
   );
   return { token, expiresIn: ACCESS_TOKEN_SECONDS };
 }
 
 /** Verify a bounded access token for exactly this resource, without trusting a cookie. */
-export function verifyAccessToken(token: string, config: OAuthConfig, now = Math.floor(Date.now() / 1000)): AccessTokenClaims | null {
+export function verifyAccessToken(token: string, config: Pick<OAuthConfig, "issuer" | "resource" | "publicKeys">, now = Math.floor(Date.now() / 1000)): AccessTokenClaims | null {
   if (token.length > 4096) return null;
   const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== HEADER || !parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p))) return null;
+  if (parts.length !== 3 || !parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p) && Buffer.from(p, "base64url").toString("base64url") === p)) return null;
+  const key = [...config.publicKeys].find(([id]) => parts[0] === header(id))?.[1];
+  if (!key) return null;
   const signature = Buffer.from(parts[2], "base64url");
-  const expected = createHmac("sha256", config.secret).update(`${parts[0]}.${parts[1]}`).digest();
-  if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) return null;
+  if (signature.length !== 64 || !verify(null, Buffer.from(`${parts[0]}.${parts[1]}`), key, signature)) return null;
   try {
     const c = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
     if (c.iss !== config.issuer || c.aud !== config.resource || !isUuid(c.sub) ||

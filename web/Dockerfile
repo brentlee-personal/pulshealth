@@ -33,13 +33,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
-RUN mkdir -p /deletion-ledger && chown nextjs:nodejs /deletion-ledger
+RUN mkdir -p /deletion-ledger /auth-keys /auth-public && chown nextjs:nodejs /deletion-ledger /auth-keys /auth-public
 # Standalone bundle + static assets (no public/ dir in this project).
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # The accounts-mode operator commands (`make web-invite`, `make web-demo`);
 # they import pg, which the standalone bundle already carries for the server.
-COPY --from=builder --chown=nextjs:nodejs /app/scripts/invite.mjs /app/scripts/demo.mjs ./scripts/
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/invite.mjs /app/scripts/demo.mjs /app/scripts/auth-keys.mjs ./scripts/
 USER nextjs
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -1,26 +1,34 @@
+import { oauthKeyFixture } from "./keyFixture";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { issueAccessToken } from "./jwt";
 import { GET } from "@/app/api/health/v1/[...path]/route";
 import { query } from "../db";
 vi.mock("../db", () => ({ query: vi.fn() }));
+const oauthKeys = oauthKeyFixture();
 const issuer = "https://viewer.example";
-const secret = "a".repeat(64);
 const user = "5ea4d000-0000-4000-8000-000000000001";
 const other = "5ea4d000-0000-4000-8000-000000000002";
 const grant = "5ea4d000-0000-4000-8000-000000000003";
-const config = { issuer, resource: `${issuer}/api/health`, secret };
+const config = { issuer, resource: `${issuer}/api/health`, ...oauthKeys };
 const request = (path: string, token: string | null = issueAccessToken(config, user, "pc_test", undefined, grant).token) => GET(
   new NextRequest(`${issuer}/api/health/v1/${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }),
   { params: Promise.resolve({ path: path.split("?")[0].split("/") }) },
 );
 beforeEach(() => {
   vi.restoreAllMocks(); vi.mocked(query).mockReset();
-  Object.assign(process.env, { WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: issuer, PULS_MCP_URL: "https://mcp.example/mcp", PULS_MCP_OAUTH_SECRET: secret,
+  Object.assign(process.env, { WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: issuer, PULS_MCP_URL: "https://mcp.example/mcp", ...oauthKeys.env,
     PULS_API_URL: "http://api:8081", PULS_API_TOKEN: "internal-only" });
   vi.mocked(query).mockResolvedValue([{ id: grant }]);
 });
 describe("public account-scoped health API", () => {
+  it("returns 503 for unavailable keys without consulting health storage or another credential", async () => {
+    process.env.PULS_AUTH_PUBLIC_KEYS_FILE = "synthetic-missing-keys";
+    const response = await request("users");
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("synthetic-missing-keys");
+    expect(query).not.toHaveBeenCalled();
+  });
   it("never trusts cookies, MCP tokens, expired tokens, or altered signatures", async () => {
     const t = issueAccessToken(config, user, "pc_test", undefined, grant).token;
     for (const token of [null, issueAccessToken({ ...config, resource: "https://mcp.example/mcp" }, user, "pc_test").token,

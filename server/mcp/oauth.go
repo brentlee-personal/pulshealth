@@ -1,24 +1,12 @@
 package main
 
-// OAuth resource server.
-//
-// Hosted connector screens (claude.ai, the Claude mobile app) and Claude
-// Code's /mcp sign-in speak OAuth 2.1 only. The web viewer in accounts mode is
-// the authorization server; this process is the resource server. It still
-// never talks to Postgres: an access token is a self-contained HS256 JWT the
-// viewer signs with PULS_MCP_OAUTH_SECRET, so verifying one is a local HMAC
-// and a few claim checks. The price is revocation latency: a revoked grant or
-// a disabled account keeps working until its access token expires (at most
-// 30 minutes; the viewer refuses the refresh at once).
-//
-// A verified token acts for its sub and for no one else: see callerAPI in
-// tools.go.
+// OAuth verifies Ed25519 tokens using public configuration only.
+// Signature verification alone does not establish current grant permission.
 
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -37,8 +25,6 @@ import (
 const (
 	// The one scope the viewer grants: read everything this server serves.
 	oauthScope = "health:read"
-	// Shortest PULS_MCP_OAUTH_SECRET accepted (`openssl rand -hex 32` is 64).
-	minOAuthSecretLen = 32
 	// Longest bearer the verifier will look at. A real token is ~450 bytes.
 	maxAccessTokenLen = 4096
 	// Clock skew tolerated between the viewer and this process, on both exp
@@ -57,7 +43,7 @@ const (
 // oauthConfig is the resource server's half of the shared contract. nil
 // (none of the three variables set) means OAuth is off.
 type oauthConfig struct {
-	secret []byte
+	publicKeyFile string
 	// resource is PULS_MCP_URL: this server's public URL, path included,
 	// and the only audience a token may name.
 	resource string
@@ -70,29 +56,27 @@ type oauthConfig struct {
 	metadataPath string
 }
 
-// loadOAuthConfig reads PULS_MCP_OAUTH_SECRET, PULS_MCP_URL and
-// PULS_MCP_OAUTH_ISSUER. The secret or the URL turns OAuth on, and then all
-// three are required: a half-set feature is a startup error, not a quietly
-// disabled one. The issuer alone does not: Compose fills it from the
-// viewer's WEB_PUBLIC_URL, which an accounts-mode viewer sets whether or not
-// the MCP server speaks OAuth.
+// loadOAuthConfig rejects retired shared secrets and requires a local public key set.
 func loadOAuthConfig(getenv func(string) string) (*oauthConfig, error) {
-	secret := getenv("PULS_MCP_OAUTH_SECRET")
+	if strings.TrimSpace(getenv("PULS_MCP_OAUTH_SECRET")) != "" {
+		return nil, errors.New("PULS_MCP_OAUTH_SECRET is retired; use PULS_AUTH_PUBLIC_KEYS_FILE")
+	}
+	if strings.TrimSpace(getenv("PULS_AUTH_PRIVATE_KEY_FILE")) != "" {
+		return nil, errors.New("MCP must not receive the authorization signing private key")
+	}
+	publicKeyFile := strings.TrimSpace(getenv("PULS_AUTH_PUBLIC_KEYS_FILE"))
 	rawURL := strings.TrimSpace(getenv("PULS_MCP_URL"))
 	rawIssuer := strings.TrimSpace(getenv("PULS_MCP_OAUTH_ISSUER"))
-	if strings.TrimSpace(secret) == "" && rawURL == "" {
+	if publicKeyFile == "" && rawURL == "" {
 		return nil, nil
 	}
-	if strings.TrimSpace(secret) == "" || rawURL == "" || rawIssuer == "" {
-		return nil, errors.New("OAuth needs all of PULS_MCP_OAUTH_SECRET, PULS_MCP_URL and PULS_MCP_OAUTH_ISSUER " +
+	if publicKeyFile == "" || rawURL == "" || rawIssuer == "" {
+		return nil, errors.New("OAuth needs all of PULS_AUTH_PUBLIC_KEYS_FILE, PULS_MCP_URL and PULS_MCP_OAUTH_ISSUER " +
 			"(Compose sets the issuer from the viewer's WEB_PUBLIC_URL); set all three, or neither of the first two " +
 			"to serve only PULS_MCP_TOKEN")
 	}
-	if err := refusePlaceholder("PULS_MCP_OAUTH_SECRET", secret); err != nil {
+	if _, err := readOAuthPublicKeys(publicKeyFile); err != nil {
 		return nil, err
-	}
-	if len(secret) < minOAuthSecretLen {
-		return nil, fmt.Errorf("PULS_MCP_OAUTH_SECRET must be at least %d characters (use `openssl rand -hex 32`)", minOAuthSecretLen)
 	}
 
 	resource, err := parsePublicURL("PULS_MCP_URL", rawURL)
@@ -113,7 +97,7 @@ func loadOAuthConfig(getenv func(string) string) (*oauthConfig, error) {
 	origin := resource.Scheme + "://" + resource.Host
 	metadataPath := protectedResourcePath + strings.TrimRight(resource.Path, "/")
 	return &oauthConfig{
-		secret: []byte(secret),
+		publicKeyFile: publicKeyFile,
 		// Compared byte for byte with a token's aud and iss, so kept as
 		// written: the viewer signs these from the same variables.
 		resource:     rawURL,
@@ -175,7 +159,7 @@ type jwtClaims struct {
 
 // errTokenMalformed and errTokenSignature mean the signature was never
 // verified: the bearer could be a guess. errTokenClaims means it was — the
-// token was minted with PULS_MCP_OAUTH_SECRET and is only expired, for
+// token was signed by an active authorization key and is only expired, for
 // another audience, unreadable after signing, and so on — so it guesses
 // nothing (see tokenSigned and bearerAuth).
 var (
@@ -215,19 +199,21 @@ func (c *oauthConfig) verifyAccessToken(token string, now time.Time) (*jwtClaims
 	if err := json.Unmarshal(headerJSON, &header); err != nil {
 		return nil, fmt.Errorf("%w: header json", errTokenMalformed)
 	}
-	// Exactly {"alg":"HS256","typ":"at+jwt"}: alg is never taken from the
-	// token's word for it beyond this one accepted value, and an extra
-	// member (kid, jku, crit, ...) is refused rather than ignored.
-	if len(header) != 2 || header["alg"] != "HS256" || header["typ"] != "at+jwt" {
+	kid, ok := header["kid"].(string)
+	if !ok || !oauthKeyID.MatchString(kid) || len(header) != 3 || header["alg"] != "EdDSA" || header["typ"] != "at+jwt" ||
+		string(headerJSON) != fmt.Sprintf(`{"alg":"EdDSA","typ":"at+jwt","kid":%q}`, kid) {
 		return nil, fmt.Errorf("%w: header", errTokenMalformed)
 	}
 	sig, err := b64.DecodeString(parts[2])
 	if err != nil {
 		return nil, fmt.Errorf("%w: signature encoding", errTokenMalformed)
 	}
-	mac := hmac.New(sha256.New, c.secret)
-	mac.Write([]byte(parts[0] + "." + parts[1]))
-	if !hmac.Equal(sig, mac.Sum(nil)) {
+	keys, err := readOAuthPublicKeys(c.publicKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	publicKey := keys[kid]
+	if len(publicKey) != ed25519.PublicKeySize || len(sig) != ed25519.SignatureSize || !ed25519.Verify(publicKey, []byte(parts[0]+"."+parts[1]), sig) {
 		return nil, errTokenSignature
 	}
 
@@ -274,28 +260,28 @@ func staticAuth(token string) authenticator {
 
 // verifySigned checks a bearer as an access token (OAuth on only). It is
 // the step bearerAuth runs *before* the limiter: a signed token proves
-// knowledge of nothing an attacker can guess, and the check is an HMAC
+// knowledge of nothing an attacker can guess, and the signature check is bounded
 // compared in constant time over at most maxAccessTokenLen bytes, so it is
 // as cheap to run for a throttled address as the limiter itself. ok is false
-// when the bearer is not a token this server's secret signed; the caller
+// when the bearer is not a token an active public key verifies; the caller
 // then treats it as a guess.
-func (a authenticator) verifySigned(bearer string) (info *auth.TokenInfo, reason string, ok bool) {
+func (a authenticator) verifySigned(bearer string) (info *auth.TokenInfo, reason error, ok bool) {
 	if a.oauth == nil {
-		return nil, "", false
+		return nil, nil, false
 	}
 	claims, err := a.oauth.verifyAccessToken(bearer, a.now())
 	if !tokenSigned(err) {
-		return nil, err.Error(), false
+		return nil, err, false
 	}
 	if err != nil {
-		return nil, err.Error(), true
+		return nil, err, true
 	}
 	return &auth.TokenInfo{
 		UserID:     claims.Sub,
 		Scopes:     strings.Fields(claims.Scope),
 		Expiration: time.Unix(*claims.Exp, 0),
 		Extra:      map[string]any{"client_id": claims.ClientID},
-	}, "", true
+	}, nil, true
 }
 
 // staticMatches reports whether a bearer is the static PULS_MCP_TOKEN.

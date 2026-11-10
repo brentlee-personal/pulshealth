@@ -136,7 +136,7 @@ comments. Beyond the passwords and tokens:
   someone else (see "Product API"). The viewer never reads
   `PULS_MULTI_USER`: its user switcher is a basic/open-mode feature that
   offers every user to whoever passes its one password.
-- `PULS_MCP_OAUTH_SECRET`, `PULS_MCP_URL` (and `PULS_MCP_OAUTH_ISSUER`,
+- `PULS_AUTH_PUBLIC_KEYS_FILE`, `PULS_MCP_URL` (and `PULS_MCP_OAUTH_ISSUER`,
   which Compose fills from `WEB_PUBLIC_URL`) — OAuth sign-in for the MCP
   server's hosted connectors, beside `PULS_MCP_TOKEN`: the viewer in accounts
   mode signs 30-minute access tokens for `PULS_MCP_URL` with the shared
@@ -534,7 +534,7 @@ address and path, never the token).
 with the same numbers, the same `TRUST_PROXY_HEADERS` switch and the same
 last-entry rule, but gates and charges only bearers that could be guesses:
 a request with no bearer (an OAuth client's discovery request) always gets
-its 401 challenge, and an access token whose HMAC verifies is checked before
+its 401 challenge, and an access token whose Ed25519 signature verifies is checked before
 the limiter — admitted if valid (even from an exhausted address), a 401 if
 expired or otherwise invalid, never charged — since hosted connectors share
 their operator's egress addresses. A wrong static token, garbage or a forged
@@ -580,7 +580,7 @@ set of secrets would strand both. Rotate one value at a time instead:
 | `PULS_TOKEN` | Edit `.env`, `docker compose up -d ingest`, then re-pair each phone from `make pairing`. |
 | A device token | `make devices ARGS='revoke <id>'`, then `scripts/bootstrap.sh --issue-device <label> [--user <uuid>]` and scan the new code on that phone. Effective on the next request; nothing restarts, and no other phone is affected. |
 | `PULS_API_TOKEN`, `PULS_MCP_TOKEN` | Edit `.env`, `docker compose up -d api mcp`, update the API consumers and AI clients (`docs/ai.md`). |
-| `PULS_MCP_OAUTH_SECRET` | Edit `.env`, `docker compose up -d web mcp`. Every access token signed with the old value stops working at once. Refresh tokens live in the database, not in the secret, so a connected assistant that refreshes on a 401 carries on; one that does not asks its user to sign in again. |
+| Ed25519 signing keys | Generate a fresh id, configure its private/public filenames, and recreate web/MCP. Retire old public keys. See [Signing keys](../docs/auth-keys.md). |
 | `GRAFANA_DB_PASSWORD`, `API_DB_PASSWORD`, `INGEST_DB_PASSWORD` | Edit `.env`, `docker compose up -d`: `migrate` re-runs `099_read_roles.sh`, which sets the new passwords, and the containers restart with them. |
 | `POSTGRES_PASSWORD` | The superuser password lives in the database, not in `.env`: `docker compose exec db psql -U postgres -c "ALTER USER postgres PASSWORD '<new>'"` first, then edit `.env` and `docker compose up -d`. |
 | `GRAFANA_PASSWORD` | Read at Grafana's first start only; change it in Grafana's own UI (or `docker compose exec grafana grafana cli admin reset-admin-password <new>`), then update `.env` to match. |
@@ -673,7 +673,7 @@ says `mode=accounts`.
 
 The same tunnel can publish the MCP server for hosted AI connectors (the
 Claude mobile app, claude.ai): add a second route, `mcp.example.com` →
-`http://mcp:8082`, and set `PULS_MCP_OAUTH_SECRET` and
+`http://mcp:8082`, and configure separate Ed25519 files using [Signing keys](../docs/auth-keys.md) and
 `PULS_MCP_URL=https://mcp.example.com/mcp`. People then sign in to the
 assistant with their viewer account. See [`docs/ai.md`](../docs/ai.md),
 "Hosted connectors (OAuth)".

@@ -2,14 +2,16 @@ package main
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,29 +21,32 @@ import (
 
 // The shared contract's test vector (the web viewer's tests sign the same).
 const (
-	vectorSecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	vectorSeed   = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 	vectorIssuer = "https://viewer.example.com"
 	vectorURL    = "https://mcp.example.com/mcp"
 	vectorSub    = "5ea4d000-0000-4000-8000-000000000001"
-	vectorToken  = "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9." +
-		"eyJpc3MiOiJodHRwczovL3ZpZXdlci5leGFtcGxlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbWNwLmV4YW1wbGUuY29tL21jcCIsInN1YiI6IjVlYTRkMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImNsaWVudF9pZCI6InBjX3Rlc3QiLCJzY29wZSI6ImhlYWx0aDpyZWFkIiwiaWF0IjoxNzkwMDAwMDAwLCJleHAiOjE3OTAwMDE4MDAsImp0aSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ." +
-		"Ovccwvjd4qDZ67ShjQwCTQYmlnLoYAoKhXzkUULFSTI"
-	vectorIat = 1790000000
-	vectorExp = 1790001800
+	vectorToken  = "eyJhbGciOiJFZERTQSIsInR5cCI6ImF0K2p3dCIsImtpZCI6InJmYzgwMzItdGVzdC0xIn0.eyJpc3MiOiJodHRwczovL3ZpZXdlci5leGFtcGxlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbWNwLmV4YW1wbGUuY29tL21jcCIsInN1YiI6IjVlYTRkMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImNsaWVudF9pZCI6InBjX3Rlc3QiLCJzY29wZSI6ImhlYWx0aDpyZWFkIiwiaWF0IjoxNzkwMDAwMDAwLCJleHAiOjE3OTAwMDE4MDAsImp0aSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifQ.jkcgRYALjcIxpK9zgBjCn2BzUTqYCHFkiCsdKuBmZbhizq6JWvgUIja1pFnb_Ci4W09ZFtT-ZXUv5NsblWRJCg"
+	vectorIat    = 1790000000
+	vectorExp    = 1790001800
 )
 
-func vectorEnv() map[string]string {
+func vectorEnv(t *testing.T) map[string]string {
+	t.Helper()
+	keyFile := filepath.Join(t.TempDir(), "public.json")
+	if err := os.WriteFile(keyFile, []byte(`{"keys":[{"kid":"rfc8032-test-1","kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","alg":"EdDSA","use":"sig"}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	return map[string]string{
-		"PULS_API_TOKEN":        "t",
-		"PULS_MCP_OAUTH_SECRET": vectorSecret,
-		"PULS_MCP_URL":          vectorURL,
-		"PULS_MCP_OAUTH_ISSUER": vectorIssuer,
+		"PULS_API_TOKEN":             "t",
+		"PULS_AUTH_PUBLIC_KEYS_FILE": keyFile,
+		"PULS_MCP_URL":               vectorURL,
+		"PULS_MCP_OAUTH_ISSUER":      vectorIssuer,
 	}
 }
 
 func vectorConfig(t *testing.T) *oauthConfig {
 	t.Helper()
-	m := vectorEnv()
+	m := vectorEnv(t)
 	c, err := loadOAuthConfig(func(k string) string { return m[k] })
 	if err != nil || c == nil {
 		t.Fatalf("loadOAuthConfig: %v, %v", c, err)
@@ -49,16 +54,18 @@ func vectorConfig(t *testing.T) *oauthConfig {
 	return c
 }
 
-// signJWT builds a token from raw header and payload JSON, signed with secret.
-func signJWT(secret, header, payload string) string {
+// signJWT signs with a public test seed; no deployment key is used.
+func signJWT(seed, header, payload string) string {
 	enc := base64.RawURLEncoding
 	signing := enc.EncodeToString([]byte(header)) + "." + enc.EncodeToString([]byte(payload))
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(signing))
-	return signing + "." + enc.EncodeToString(mac.Sum(nil))
+	bytes, err := hex.DecodeString(seed)
+	if err != nil || len(bytes) != ed25519.SeedSize {
+		panic("invalid test seed")
+	}
+	return signing + "." + enc.EncodeToString(ed25519.Sign(ed25519.NewKeyFromSeed(bytes), []byte(signing)))
 }
 
-const goodHeader = `{"alg":"HS256","typ":"at+jwt"}`
+const goodHeader = `{"alg":"EdDSA","typ":"at+jwt","kid":"rfc8032-test-1"}`
 
 // claimsJSON renders the contract's claims in its key order, with overrides
 // (a nil value drops the key).
@@ -105,7 +112,7 @@ var vectorNow = time.Unix(vectorIat+100, 0)
 
 func TestAccessTokenVector(t *testing.T) {
 	// The test helper signs exactly the contract's token.
-	if got := signJWT(vectorSecret, goodHeader, claimsJSON(nil)); got != vectorToken {
+	if got := signJWT(vectorSeed, goodHeader, claimsJSON(nil)); got != vectorToken {
 		t.Fatalf("signJWT(vector) =\n%s\nwant\n%s", got, vectorToken)
 	}
 	c := vectorConfig(t)
@@ -144,40 +151,42 @@ func TestAccessTokenRejections(t *testing.T) {
 		now   time.Time
 	}{
 		"alg none, unsigned":  {enc([]byte(`{"alg":"none","typ":"at+jwt"}`)) + "." + enc([]byte(good)) + ".", vectorNow},
-		"alg none, signed":    {signJWT(vectorSecret, `{"alg":"none","typ":"at+jwt"}`, good), vectorNow},
-		"alg RS256":           {signJWT(vectorSecret, `{"alg":"RS256","typ":"at+jwt"}`, good), vectorNow},
-		"alg HS512":           {signJWT(vectorSecret, `{"alg":"HS512","typ":"at+jwt"}`, good), vectorNow},
-		"alg hs256":           {signJWT(vectorSecret, `{"alg":"hs256","typ":"at+jwt"}`, good), vectorNow},
-		"typ JWT":             {signJWT(vectorSecret, `{"alg":"HS256","typ":"JWT"}`, good), vectorNow},
-		"typ missing":         {signJWT(vectorSecret, `{"alg":"HS256"}`, good), vectorNow},
-		"extra header kid":    {signJWT(vectorSecret, `{"alg":"HS256","typ":"at+jwt","kid":"x"}`, good), vectorNow},
-		"header not object":   {signJWT(vectorSecret, `["HS256"]`, good), vectorNow},
+		"alg none, signed":    {signJWT(vectorSeed, `{"alg":"none","typ":"at+jwt"}`, good), vectorNow},
+		"alg RS256":           {signJWT(vectorSeed, `{"alg":"RS256","typ":"at+jwt"}`, good), vectorNow},
+		"alg HS512":           {signJWT(vectorSeed, `{"alg":"HS512","typ":"at+jwt"}`, good), vectorNow},
+		"alg hs256":           {signJWT(vectorSeed, `{"alg":"hs256","typ":"at+jwt"}`, good), vectorNow},
+		"typ JWT":             {signJWT(vectorSeed, `{"alg":"EdDSA","typ":"JWT","kid":"rfc8032-test-1"}`, good), vectorNow},
+		"typ missing":         {signJWT(vectorSeed, `{"alg":"EdDSA","kid":"rfc8032-test-1"}`, good), vectorNow},
+		"unknown kid":         {signJWT(vectorSeed, `{"alg":"EdDSA","typ":"at+jwt","kid":"unknown"}`, good), vectorNow},
+		"untrusted key URL":   {signJWT(vectorSeed, `{"alg":"EdDSA","typ":"at+jwt","kid":"rfc8032-test-1","jku":"https://invalid.example"}`, good), vectorNow},
+		"duplicate algorithm": {signJWT(vectorSeed, `{"alg":"EdDSA","alg":"EdDSA","typ":"at+jwt","kid":"rfc8032-test-1"}`, good), vectorNow},
+		"header not object":   {signJWT(vectorSeed, `["HS256"]`, good), vectorNow},
 		"bad signature":       {flip(vectorToken), vectorNow},
-		"other secret":        {signJWT(strings.Repeat("z", 64), goodHeader, good), vectorNow},
+		"other secret":        {signJWT(strings.Repeat("00", 32), goodHeader, good), vectorNow},
 		"signature stripped":  {vectorToken[:strings.LastIndex(vectorToken, ".")+1], vectorNow},
-		"wrong issuer":        {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"iss": "https://evil.example.com"})), vectorNow},
-		"issuer trailing /":   {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"iss": vectorIssuer + "/"})), vectorNow},
-		"wrong audience":      {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"aud": "https://other.example.com/mcp"})), vectorNow},
-		"audience array":      {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"aud": []string{vectorURL}})), vectorNow},
+		"wrong issuer":        {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"iss": "https://evil.example.com"})), vectorNow},
+		"issuer trailing /":   {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"iss": vectorIssuer + "/"})), vectorNow},
+		"wrong audience":      {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"aud": "https://other.example.com/mcp"})), vectorNow},
+		"audience array":      {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"aud": []string{vectorURL}})), vectorNow},
 		"expired":             {vectorToken, time.Unix(vectorExp+61, 0)},
 		"iat in the future":   {vectorToken, time.Unix(vectorIat-61, 0)},
-		"exp missing":         {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"exp": nil})), vectorNow},
-		"iat missing":         {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"iat": nil})), vectorNow},
-		"exp fractional":      {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"exp": json.RawMessage("1790001800.5")})), vectorNow},
-		"exp string":          {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"exp": "1790001800"})), vectorNow},
-		"sub not a UUID":      {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"sub": "alice"})), vectorNow},
-		"sub upper case":      {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"sub": strings.ToUpper(vectorSub)})), vectorNow},
-		"sub missing":         {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"sub": nil})), vectorNow},
-		"scope missing":       {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"scope": nil})), vectorNow},
-		"scope other":         {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"scope": "health:write"})), vectorNow},
-		"scope prefix":        {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"scope": "health:readx"})), vectorNow},
-		"payload not object":  {signJWT(vectorSecret, goodHeader, `"x"`), vectorNow},
-		"trailing json":       {signJWT(vectorSecret, goodHeader, good+"{}"), vectorNow},
+		"exp missing":         {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"exp": nil})), vectorNow},
+		"iat missing":         {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"iat": nil})), vectorNow},
+		"exp fractional":      {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"exp": json.RawMessage("1790001800.5")})), vectorNow},
+		"exp string":          {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"exp": "1790001800"})), vectorNow},
+		"sub not a UUID":      {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"sub": "alice"})), vectorNow},
+		"sub upper case":      {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"sub": strings.ToUpper(vectorSub)})), vectorNow},
+		"sub missing":         {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"sub": nil})), vectorNow},
+		"scope missing":       {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"scope": nil})), vectorNow},
+		"scope other":         {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"scope": "health:write"})), vectorNow},
+		"scope prefix":        {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"scope": "health:readx"})), vectorNow},
+		"payload not object":  {signJWT(vectorSeed, goodHeader, `"x"`), vectorNow},
+		"trailing json":       {signJWT(vectorSeed, goodHeader, good+"{}"), vectorNow},
 		"two parts":           {vectorToken[:strings.LastIndex(vectorToken, ".")], vectorNow},
 		"four parts":          {vectorToken + ".x", vectorNow},
 		"empty":               {"", vectorNow},
 		"padded base64":       {strings.Replace(vectorToken, ".", "=.", 1), vectorNow},
-		"oversize":            {signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"pad": strings.Repeat("a", maxAccessTokenLen)})), vectorNow},
+		"oversize":            {signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"pad": strings.Repeat("a", maxAccessTokenLen)})), vectorNow},
 		"static-looking junk": {"mcp-secret", vectorNow},
 	}
 	for name, tc := range cases {
@@ -186,14 +195,14 @@ func TestAccessTokenRejections(t *testing.T) {
 		}
 	}
 	// Scope among others is fine.
-	if _, err := c.verifyAccessToken(signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"scope": "openid health:read"})), vectorNow); err != nil {
+	if _, err := c.verifyAccessToken(signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"scope": "openid health:read"})), vectorNow); err != nil {
 		t.Errorf("scope list containing health:read: %v", err)
 	}
 }
 
 func TestLoadOAuthConfig(t *testing.T) {
 	load := func(over map[string]string) (*oauthConfig, error) {
-		m := vectorEnv()
+		m := vectorEnv(t)
 		for k, v := range over {
 			m[k] = v
 		}
@@ -213,17 +222,18 @@ func TestLoadOAuthConfig(t *testing.T) {
 	}
 	// The issuer alone (Compose passes WEB_PUBLIC_URL to every accounts-mode
 	// install) leaves OAuth off rather than failing startup.
-	if c, err := load(map[string]string{"PULS_MCP_OAUTH_SECRET": "", "PULS_MCP_URL": ""}); c != nil || err != nil {
+	if c, err := load(map[string]string{"PULS_AUTH_PUBLIC_KEYS_FILE": "", "PULS_MCP_URL": ""}); c != nil || err != nil {
 		t.Errorf("issuer only = %v, %v; want off", c, err)
 	}
 	bad := map[string]map[string]string{
-		"secret only":       {"PULS_MCP_URL": "", "PULS_MCP_OAUTH_ISSUER": ""},
-		"url only":          {"PULS_MCP_OAUTH_SECRET": "", "PULS_MCP_OAUTH_ISSUER": ""},
+		"public keys only":  {"PULS_MCP_URL": "", "PULS_MCP_OAUTH_ISSUER": ""},
+		"url only":          {"PULS_AUTH_PUBLIC_KEYS_FILE": "", "PULS_MCP_OAUTH_ISSUER": ""},
 		"no issuer":         {"PULS_MCP_OAUTH_ISSUER": ""},
 		"no url":            {"PULS_MCP_URL": " "},
-		"no secret":         {"PULS_MCP_OAUTH_SECRET": ""},
+		"no public keys":    {"PULS_AUTH_PUBLIC_KEYS_FILE": ""},
 		"placeholder":       {"PULS_MCP_OAUTH_SECRET": "change-me"},
 		"short secret":      {"PULS_MCP_OAUTH_SECRET": strings.Repeat("a", 31)},
+		"private key":       {"PULS_AUTH_PRIVATE_KEY_FILE": "synthetic-forbidden-private-file"},
 		"http url":          {"PULS_MCP_URL": "http://mcp.example.com/mcp"},
 		"url without path":  {"PULS_MCP_URL": "https://mcp.example.com"},
 		"url with query":    {"PULS_MCP_URL": "https://mcp.example.com/mcp?x=1"},
@@ -243,7 +253,7 @@ func TestLoadOAuthConfig(t *testing.T) {
 		t.Errorf("loopback http: %v", err)
 	}
 	// loadConfig carries it, and a partial setting fails startup.
-	m := vectorEnv()
+	m := vectorEnv(t)
 	cfg, err := loadConfig(func(k string) string { return m[k] })
 	if err != nil || cfg.oauth == nil {
 		t.Fatalf("loadConfig with OAuth: %+v, %v", cfg, err)
@@ -268,7 +278,7 @@ func oauthHarness(t *testing.T, s *service) (*httptest.Server, authenticator) {
 // tokenFor mints a currently valid access token for sub.
 func tokenFor(sub string) string {
 	now := time.Now().Unix()
-	return signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"sub": sub, "iat": now, "exp": now + 1800}))
+	return signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"sub": sub, "iat": now, "exp": now + 1800}))
 }
 
 func TestProtectedResourceMetadata(t *testing.T) {
@@ -340,8 +350,8 @@ func TestOAuthChallengeAndLimiter(t *testing.T) {
 	}
 	// A signed but expired token guesses nothing (forging it needs the
 	// secret): it is a 401 invalid_token, never charged, however often.
-	expired := signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"exp": vectorIat}))
-	wrongAud := signJWT(vectorSecret, goodHeader, claimsJSON(map[string]any{"aud": "https://other.example.com/mcp"}))
+	expired := signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"exp": vectorIat}))
+	wrongAud := signJWT(vectorSeed, goodHeader, claimsJSON(map[string]any{"aud": "https://other.example.com/mcp"}))
 	for i := 0; i < authFailureBurst*3; i++ {
 		for _, tok := range []string{expired, wrongAud} {
 			rec := mcpAttempt(t, h, "Bearer "+tok, "192.0.2.3:1", "")
@@ -366,7 +376,7 @@ func TestOAuthChallengeAndLimiter(t *testing.T) {
 
 	// Guesses — garbage, a forged signature, a wrong static token — are
 	// still charged and, once the budget is spent, refused before compare.
-	guesses := []string{"garbage", flipLast(vectorToken), "mcp-secreu", signJWT(strings.Repeat("z", 64), goodHeader, claimsJSON(nil))}
+	guesses := []string{"garbage", flipLast(vectorToken), "mcp-secreu", signJWT(strings.Repeat("00", 32), goodHeader, claimsJSON(nil))}
 	for i := 0; i < authFailureBurst; i++ {
 		if rec := mcpAttempt(t, h, "Bearer "+guesses[i%len(guesses)], "192.0.2.5:1", ""); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("guess %d = %d, want 401", i, rec.Code)

@@ -1,3 +1,4 @@
+import { oauthKeyFixture } from "./oauth/keyFixture";
 // OAuth for AI assistants against a real, migrated database (019_oauth.sql),
 // through the viewer's own store and route handlers, connected as web_app:
 // registration; the consent's code exchanged once and only once (a replay
@@ -16,9 +17,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { requireIntegrationDatabases } from "./integrationEnv";
 
+const oauthKeys = oauthKeyFixture();
 const { webUrl: WEB_URL, adminUrl: ADMIN_URL } = requireIntegrationDatabases();
 
-const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const ISSUER = "https://viewer.example";
 const MCP = "https://mcp.example/mcp";
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
@@ -85,7 +86,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     process.env.TRUST_PROXY_HEADERS = "true";
     process.env.WEB_PUBLIC_URL = ISSUER;
     process.env.PULS_MCP_URL = MCP;
-    process.env.PULS_MCP_OAUTH_SECRET = SECRET;
+    delete process.env.PULS_MCP_OAUTH_SECRET;
+  Object.assign(process.env, oauthKeys.env);
     process.env.DATABASE_URL = WEB_URL;
     admin = new Client({ connectionString: ADMIN_URL });
     await admin.connect();

@@ -1,26 +1,17 @@
-// Whether this viewer is an OAuth 2.1 authorization server for the MCP
-// server (server/mcp), and with what settings. See web/README.md, "AI
-// assistants (OAuth)".
-//
-// On only in accounts mode, and only with all three of PULS_MCP_OAUTH_SECRET
-// (the HMAC key the MCP server verifies access tokens with), PULS_MCP_URL
-// (the MCP server's public URL: the tokens' audience) and WEB_PUBLIC_URL (the
-// issuer). Off, every OAuth path is a 404. A setting that is present but
-// unusable — a secret shorter than 32 characters or the `change-me`
-// placeholder, a URL that is not https — also leaves it off, with one error
-// in the log: fail closed, but keep serving the viewer.
-//
-// Read from the environment per call, like lib/mode.ts.
+// OAuth signing configuration. Only the authorization module holds the private file.
+// Invalid or partial settings fail closed; startup rejects them.
 
+import { type KeyObject } from "node:crypto";
 import { type Env, viewerMode } from "../mode";
+import { readPublicKeys, readSigningKey, type SigningKey } from "./keys";
 
 export interface OAuthConfig {
   /** WEB_PUBLIC_URL without a trailing slash: the `iss` of every token. */
   issuer: string;
   /** PULS_MCP_URL exactly: the `aud` of every token. */
   resource: string;
-  /** PULS_MCP_OAUTH_SECRET, used as UTF-8 bytes. */
-  secret: string;
+  signingKey: SigningKey;
+  publicKeys: ReadonlyMap<string, KeyObject>;
 }
 
 export type OAuthSetting =
@@ -28,7 +19,6 @@ export type OAuthSetting =
   | { state: "off" }
   | { state: "invalid"; problem: string };
 
-export const MIN_SECRET_LENGTH = 32;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /** An https URL, or http on a loopback host (development); null if neither. */
@@ -45,32 +35,35 @@ function webUrl(raw: string): URL | null {
 }
 
 export function readOAuthConfig(env: Env = process.env): OAuthSetting {
+  if (env.PULS_MCP_OAUTH_SECRET) return { state: "invalid", problem: "PULS_MCP_OAUTH_SECRET is retired; use separate Ed25519 key files" };
   if (viewerMode(env) !== "accounts") return { state: "off" };
-  const secret = env.PULS_MCP_OAUTH_SECRET ?? "";
+  const privateFile = env.PULS_AUTH_PRIVATE_KEY_FILE ?? "";
+  const publicFile = env.PULS_AUTH_PUBLIC_KEYS_FILE ?? "";
+  const keyId = env.PULS_AUTH_KEY_ID ?? "";
   const resource = (env.PULS_MCP_URL ?? "").trim();
   const publicUrl = (env.WEB_PUBLIC_URL ?? "").trim();
-  if (!secret && !resource) return { state: "off" };
-  if (!secret || !resource || !publicUrl) {
+  if (!privateFile && !publicFile && !keyId && !resource) return { state: "off" };
+  if (!privateFile || !publicFile || !keyId || !resource || !publicUrl) {
     return {
       state: "invalid",
-      problem: "OAuth for AI assistants needs PULS_MCP_OAUTH_SECRET, PULS_MCP_URL and WEB_PUBLIC_URL all set",
-    };
-  }
-  if (secret === "change-me" || secret.length < MIN_SECRET_LENGTH) {
-    return {
-      state: "invalid",
-      problem: `PULS_MCP_OAUTH_SECRET must be at least ${MIN_SECRET_LENGTH} characters and not the change-me placeholder (openssl rand -hex 32)`,
+      problem: "OAuth needs PULS_AUTH_PRIVATE_KEY_FILE, PULS_AUTH_PUBLIC_KEYS_FILE, PULS_AUTH_KEY_ID, PULS_MCP_URL and WEB_PUBLIC_URL",
     };
   }
   const resourceUrl = webUrl(resource);
-  if (!resourceUrl || resourceUrl.search) {
+  if (!resourceUrl || resourceUrl.search || resourceUrl.pathname === "/") {
     return { state: "invalid", problem: "PULS_MCP_URL must be the MCP server's https URL, path included (https://mcp.example.com/mcp)" };
   }
   const issuerUrl = webUrl(publicUrl);
-  if (!issuerUrl || issuerUrl.search) {
+  if (!issuerUrl || issuerUrl.search || issuerUrl.pathname !== "/") {
     return { state: "invalid", problem: "WEB_PUBLIC_URL must be the viewer's https URL to issue OAuth tokens" };
   }
-  return { state: "on", config: { issuer: publicUrl.replace(/\/+$/, ""), resource, secret } };
+  try {
+    const publicKeys = readPublicKeys(publicFile);
+    const signingKey = readSigningKey(privateFile, keyId, publicKeys);
+    return { state: "on", config: { issuer: publicUrl.replace(/\/+$/, ""), resource, signingKey, publicKeys } };
+  } catch (error) {
+    return { state: "invalid", problem: error instanceof Error ? error.message : "OAuth key files are unavailable" };
+  }
 }
 
 // The problem logged last, so a broken setting is said once, not per request.
@@ -82,7 +75,7 @@ export function oauthConfig(env: Env = process.env): OAuthConfig | null {
   if (setting.state === "on") return setting.config;
   if (setting.state === "invalid" && globalForOAuth.__pulsOAuthProblem !== setting.problem) {
     globalForOAuth.__pulsOAuthProblem = setting.problem;
-    console.error(`[puls-web] ${setting.problem}; OAuth for AI assistants is OFF (every /oauth path answers 404).`);
+    console.error(`[puls-web] ${setting.problem}; OAuth authorization is unavailable.`);
   }
   return null;
 }

@@ -1,7 +1,9 @@
+import { oauthKeyFixture } from "./lib/oauth/keyFixture";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The session store is the database; here it is whatever each test says.
+const oauthKeys = oauthKeyFixture();
 const findSession = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/accounts/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/accounts/session")>();
@@ -200,7 +202,7 @@ describe("OAuth for AI assistants", () => {
     TRUST_PROXY_HEADERS: "true",
     WEB_PUBLIC_URL: "https://viewer.example",
     PULS_MCP_URL: "https://mcp.example/mcp",
-    PULS_MCP_OAUTH_SECRET: "0123456789abcdef0123456789abcdef",
+    ...oauthKeys.env,
   };
   const OAUTH_PATHS = [
     "/.well-known/oauth-authorization-server",
@@ -219,7 +221,7 @@ describe("OAuth for AI assistants", () => {
 
   it("answers 404 on every OAuth path while OAuth is off, in every mode", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const env of [{}, { WEB_AUTH_PASSWORD: "pw" }, { WEB_ACCOUNTS: "true", TRUST_PROXY_HEADERS: "true" }, { ...OAUTH_ENV, PULS_MCP_OAUTH_SECRET: "change-me" }]) {
+    for (const env of [{}, { WEB_AUTH_PASSWORD: "pw" }, { WEB_ACCOUNTS: "true", TRUST_PROXY_HEADERS: "true" }]) {
       Object.assign(process.env, env);
       for (const path of OAUTH_PATHS) {
         for (const method of ["GET", "POST"]) {
@@ -229,6 +231,14 @@ describe("OAuth for AI assistants", () => {
       }
       for (const k of Object.keys(env)) delete process.env[k];
     }
+    expect(findSession).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 for unavailable signing configuration instead of another authentication mode", async () => {
+    Object.assign(process.env, OAUTH_ENV, { PULS_AUTH_PUBLIC_KEYS_FILE: "synthetic-missing-key-file" });
+    const response = await proxy(request("/oauth/token", { method: "POST", headers: viaProxy }));
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("synthetic-missing-key-file");
     expect(findSession).not.toHaveBeenCalled();
   });
 

@@ -1,77 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isOAuthPath, oauthConfig, readOAuthConfig } from "./config";
+import { oauthKeyFixture } from "./keyFixture";
 
-const SECRET = "0123456789abcdef0123456789abcdef";
+const keys = oauthKeyFixture();
 const ON = {
   WEB_ACCOUNTS: "true",
   WEB_PUBLIC_URL: "https://viewer.example.com/",
   PULS_MCP_URL: "https://mcp.example.com/mcp",
-  PULS_MCP_OAUTH_SECRET: SECRET,
+  ...keys.env,
 };
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("readOAuthConfig", () => {
-  it("is on with all three settings in accounts mode, the issuer without its trailing slash", () => {
-    expect(readOAuthConfig(ON)).toEqual({
-      state: "on",
-      config: { issuer: "https://viewer.example.com", resource: "https://mcp.example.com/mcp", secret: SECRET },
-    });
+  it("loads a matching Ed25519 signer and public-only verifier configuration", () => {
+    const setting = readOAuthConfig(ON);
+    expect(setting.state).toBe("on");
+    if (setting.state !== "on") return;
+    expect(setting.config.issuer).toBe("https://viewer.example.com");
+    expect(setting.config.resource).toBe("https://mcp.example.com/mcp");
+    expect(setting.config.signingKey.id).toBe(keys.signingKey.id);
+    expect(setting.config.signingKey.privateKey.type).toBe("private");
+    expect([...setting.config.publicKeys.values()].every((key) => key.type === "public")).toBe(true);
+    expect(Object.hasOwn(setting.config, "secret")).toBe(false);
   });
 
-  it("is off outside accounts mode, and with neither the secret nor the URL", () => {
+  it("is off outside accounts mode or without any OAuth key and resource settings", () => {
     expect(readOAuthConfig({ ...ON, WEB_ACCOUNTS: "false" }).state).toBe("off");
-    expect(readOAuthConfig({ ...ON, WEB_ACCOUNTS: undefined, WEB_AUTH_PASSWORD: "x" }).state).toBe("off");
     expect(readOAuthConfig({ WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: ON.WEB_PUBLIC_URL }).state).toBe("off");
   });
 
-  it("refuses a short or placeholder secret, a missing setting, and non-https URLs", () => {
+  it("rejects retired shared secrets, partial keys, unknown ids and invalid URLs", () => {
     for (const env of [
-      { ...ON, PULS_MCP_OAUTH_SECRET: "change-me" },
-      { ...ON, PULS_MCP_OAUTH_SECRET: SECRET.slice(1) },
-      { ...ON, PULS_MCP_OAUTH_SECRET: undefined },
+      { ...ON, PULS_MCP_OAUTH_SECRET: "retired-test-secret" },
+      { ...ON, PULS_AUTH_PRIVATE_KEY_FILE: undefined },
+      { ...ON, PULS_AUTH_PUBLIC_KEYS_FILE: undefined },
+      { ...ON, PULS_AUTH_KEY_ID: undefined },
+      { ...ON, PULS_AUTH_KEY_ID: "unknown" },
+      { ...ON, PULS_AUTH_PRIVATE_KEY_FILE: "synthetic-missing-key" },
       { ...ON, PULS_MCP_URL: undefined },
       { ...ON, WEB_PUBLIC_URL: undefined },
       { ...ON, PULS_MCP_URL: "http://mcp.example.com/mcp" },
       { ...ON, PULS_MCP_URL: "https://mcp.example.com/mcp?x=1" },
       { ...ON, PULS_MCP_URL: "not a url" },
       { ...ON, WEB_PUBLIC_URL: "http://viewer.example.com" },
-    ]) {
-      expect(readOAuthConfig(env).state, JSON.stringify(env)).toBe("invalid");
-    }
-    // Loopback http is fine for development.
+      { ...ON, WEB_PUBLIC_URL: "https://viewer.example.com/app" },
+      { ...ON, PULS_MCP_URL: "https://mcp.example.com" },
+    ]) expect(readOAuthConfig(env).state).toBe("invalid");
     expect(readOAuthConfig({ ...ON, WEB_PUBLIC_URL: "http://localhost:3000", PULS_MCP_URL: "http://127.0.0.1:8090/mcp" }).state).toBe("on");
   });
 
-  it("fails closed with one logged error, not one per request", () => {
+  it("reports a fixed failure once, without exposing obsolete secret contents", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const bad = { ...ON, PULS_MCP_OAUTH_SECRET: "change-me" };
+    const bad = { ...ON, PULS_MCP_OAUTH_SECRET: "synthetic-retired-secret-value" };
     expect(oauthConfig(bad)).toBeNull();
     expect(oauthConfig(bad)).toBeNull();
     expect(error).toHaveBeenCalledTimes(1);
-    // The message names the variable, never its value.
     expect(String(error.mock.calls[0][0])).toContain("PULS_MCP_OAUTH_SECRET");
-    const short = readOAuthConfig({ ...ON, PULS_MCP_OAUTH_SECRET: "short-secret-value" });
-    expect(short.state === "invalid" && short.problem).not.toContain("short-secret-value");
+    expect(String(error.mock.calls[0][0])).not.toContain(bad.PULS_MCP_OAUTH_SECRET);
     expect(oauthConfig(ON)).not.toBeNull();
   });
 });
 
 describe("isOAuthPath", () => {
   it("names exactly the OAuth endpoints", () => {
-    for (const p of [
-      "/.well-known/oauth-authorization-server",
-      "/oauth/register",
-      "/oauth/authorize",
-      "/oauth/authorize/decision",
-      "/oauth/token",
-      "/oauth/revoke",
-    ]) {
-      expect(isOAuthPath(p), p).toBe(true);
-    }
-    for (const p of ["/oauth", "/oauth/", "/oauth/token/x", "/.well-known/openid-configuration", "/api/auth/assistants"]) {
-      expect(isOAuthPath(p), p).toBe(false);
+    for (const path of [
+      "/.well-known/oauth-authorization-server", "/oauth/register", "/oauth/authorize",
+      "/oauth/authorize/decision", "/oauth/token", "/oauth/revoke",
+    ]) expect(isOAuthPath(path)).toBe(true);
+    for (const path of ["/oauth", "/oauth/", "/oauth/token/x", "/.well-known/openid-configuration", "/api/auth/assistants"]) {
+      expect(isOAuthPath(path)).toBe(false);
     }
   });
 });

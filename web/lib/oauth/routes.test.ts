@@ -1,13 +1,15 @@
+import { oauthKeyFixture } from "./keyFixture";
 // The OAuth route handlers' own decisions, with the database mocked out:
 // metadata, registration, the token endpoint's client authentication,
 // parameter checks, throttling and answers, revocation, and the consent
 // form's re-validation. The database's side — single-use codes, refresh
 // rotation and reuse detection — is in oauth.integration.test.ts.
 
-import { createHmac } from "node:crypto";
+import { verify } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+const oauthKeys = oauthKeyFixture();
 const store = vi.hoisted(() => ({
   registerClient: vi.fn(),
   findClient: vi.fn(),
@@ -20,7 +22,6 @@ const sessions = vi.hoisted(() => ({ findSession: vi.fn() }));
 vi.mock("./store", async (importOriginal) => ({ ...(await importOriginal<typeof import("./store")>()), ...store }));
 vi.mock("../accounts/session", async (importOriginal) => ({ ...(await importOriginal<typeof import("../accounts/session")>()), ...sessions }));
 
-const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const ISSUER = "https://viewer.example.com";
 const MCP = "https://mcp.example.com/mcp";
 const CLIENT_ID = "pc_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -55,7 +56,8 @@ beforeAll(() => {
   process.env.TRUST_PROXY_HEADERS = "true";
   process.env.WEB_PUBLIC_URL = `${ISSUER}/`;
   process.env.PULS_MCP_URL = MCP;
-  process.env.PULS_MCP_OAUTH_SECRET = SECRET;
+  delete process.env.PULS_MCP_OAUTH_SECRET;
+  Object.assign(process.env, oauthKeys.env);
   delete process.env.WEB_CLIENT_IP_HEADER;
 });
 afterAll(() => {
@@ -68,7 +70,10 @@ beforeEach(() => {
 
 describe("while OAuth is off", () => {
   it("answers 404 on every endpoint", async () => {
-    process.env.PULS_MCP_OAUTH_SECRET = "change-me";
+    delete process.env.PULS_AUTH_PRIVATE_KEY_FILE;
+    delete process.env.PULS_AUTH_PUBLIC_KEYS_FILE;
+    delete process.env.PULS_AUTH_KEY_ID;
+    delete process.env.PULS_MCP_URL;
     vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const meta = await import("@/app/.well-known/oauth-authorization-server/route");
@@ -84,7 +89,9 @@ describe("while OAuth is off", () => {
       expect((await decision.POST(req("/oauth/authorize/decision", { body: "" }))).status).toBe(404);
       expect(store.findClient).not.toHaveBeenCalled();
     } finally {
-      process.env.PULS_MCP_OAUTH_SECRET = SECRET;
+      delete process.env.PULS_MCP_OAUTH_SECRET;
+      Object.assign(process.env, oauthKeys.env);
+      process.env.PULS_MCP_URL = MCP;
       vi.restoreAllMocks();
     }
   });
@@ -226,7 +233,7 @@ describe("token endpoint", () => {
     const body = await res.json();
     expect(body).toMatchObject({ token_type: "Bearer", expires_in: 1800, refresh_token: TOKEN, scope: "health:read" });
     const [h, p, s] = body.access_token.split(".");
-    expect(createHmac("sha256", SECRET).update(`${h}.${p}`).digest("base64url")).toBe(s);
+    expect(verify(null, Buffer.from(`${h}.${p}`), oauthKeys.publicKey, Buffer.from(s, "base64url"))).toBe(true);
     expect(JSON.parse(Buffer.from(p, "base64url").toString())).toMatchObject({ iss: ISSUER, aud: MCP, sub: USER, client_id: CLIENT_ID });
     expect(store.exchangeCode).toHaveBeenCalledWith({
       code: TOKEN,

@@ -8,7 +8,7 @@ COMPOSE       := docker compose --project-directory server -f server/docker-comp
 COMPOSE_BUILD := $(COMPOSE) -f server/compose.build.yml
 ARGS          ?=
 
-.PHONY: help bootstrap up down pull logs ps migrate baseline pairing issue-device devices web-invite web-demo dev-up \
+.PHONY: help bootstrap up down pull logs ps migrate baseline pairing issue-device devices web-invite web-keys web-demo dev-up \
         backup backup-list restore site-dev site-build site-lint blog-check deploy-site
 
 help: ## List targets
@@ -62,6 +62,10 @@ devices: ## Per-device tokens: ARGS='list [--all]' | 'issue --user <uuid> --name
 web-invite: ## Invite a new member: ARGS='--email <address> [--admin] [--send]'
 	@$(if $(strip $(ARGS)),:,echo "usage: make web-invite ARGS='--email <address> [--admin] [--url https://<viewer host>]'"; exit 2)
 	$(COMPOSE) exec web node scripts/invite.mjs $(ARGS)
+
+web-keys: ## Create separate signing and public keys: ARGS='key-v1'
+	@$(if $(strip $(ARGS)),:,echo "usage: make web-keys ARGS='key-v1'"; exit 2)
+	$(COMPOSE) exec web node scripts/auth-keys.mjs /auth-keys /auth-public $(ARGS)
 
 # The account behind the public demo (accounts mode, WEB_DEMO_USER): no
 # password signs in to it, /demo does. The user must exist first and hold only

@@ -499,19 +499,21 @@ server** for the MCP server (`server/mcp`, `docs/ai.md`), so the Claude apps
 and claude.ai's custom connectors (which reach the MCP server from
 Anthropic's cloud and speak only OAuth) and Claude Code can read one
 signed-in person's records. People connect with the account they already
-have here; nothing new to invite. Set, in `server/.env`:
+have here; nothing new to invite. Generate keys with `make web-keys ARGS='key-v1'`.
+See [Signing keys](../docs/auth-keys.md), then set file references in `server/.env`:
 
 ```bash
-PULS_MCP_OAUTH_SECRET=...    # openssl rand -hex 32; the MCP server gets the same value
+PULS_AUTH_KEY_ID=key-v1
+PULS_AUTH_PRIVATE_KEY_FILE=/auth-keys/key-v1.pem
+PULS_AUTH_PUBLIC_KEYS_FILE=/auth-public/key-v1.json
 PULS_MCP_URL=https://mcp.example.com/mcp   # the MCP server's public URL, path included
 WEB_PUBLIC_URL=https://viewer.example.com  # already set for accounts mode: the issuer
 ```
 
-It is on only with `WEB_ACCOUNTS=true` and all three set. Otherwise every
-OAuth path below answers 404. A secret shorter than 32 characters or the
-`change-me` placeholder, or a URL that is not https (http only on a loopback
-host, for development), leaves it off too. That is one error in the log
-naming the variable, never its value, and the viewer keeps serving.
+OAuth is off when its key files and resource are unset. Partial, invalid or
+retired shared-key settings prevent startup; unavailable key files return
+503 at the authenticated read boundary. Only the authorization module gets
+the private file. MCP receives the public file read-only.
 
 | Endpoint | What |
 |---|---|
@@ -531,17 +533,17 @@ framed (`frame-ancestors 'none'`, `X-Frame-Options: DENY`). Its CSP
 `form-action` names the redirect URI's origin, so the browser follows the
 303 back to the app.
 
-**Access tokens** are HS256 JWTs (`typ: at+jwt`, `lib/oauth/jwt.ts`). Their
+**Access tokens** are Ed25519 JWTs (`alg: EdDSA`, `typ: at+jwt`, active `kid`, `lib/oauth/jwt.ts`). Their
 `iss` is `WEB_PUBLIC_URL` and their `aud` is `PULS_MCP_URL`. Their `sub` is
 the account's user id, and they last 30 minutes. The MCP server verifies
-them with the shared secret and never asks the database. So **a revocation
+them with its local public key file and never asks the database. So **a revocation
 takes up to 30 minutes to stop an assistant**: refreshing stops at once, but
 the access token it holds runs out its time. That applies to **Revoke** on
 the account page (the **AI assistants** section), to disabling an account
 (`auth.set_account_disabled`), to deleting one (`auth.delete_my_account`;
 purging deletes the grants with the account) and to a password change,
 which all revoke every grant of the account. Rotating
-`PULS_MCP_OAUTH_SECRET` ends every access token at once. Refresh tokens
+the signing key and removing the retired public key ends old access tokens. Refresh tokens
 stay valid, and assistants carry on with new access tokens.
 
 The MCP server calls the product API with `user=<sub>`. Unless that is the

@@ -74,7 +74,7 @@ type config struct {
 	// unless a call names one. It applies to the static token (and stdio);
 	// an OAuth access token always acts for its own sub.
 	userID string
-	// oauth is non-nil when PULS_MCP_OAUTH_SECRET, PULS_MCP_URL and
+	// oauth is non-nil when PULS_AUTH_PUBLIC_KEYS_FILE, PULS_MCP_URL and
 	// PULS_MCP_OAUTH_ISSUER are set (oauth.go).
 	oauth *oauthConfig
 }
@@ -150,7 +150,7 @@ func main() {
 		os.Exit(runHealthcheck(os.Args[2:], ":8082", os.Stderr))
 	}
 
-	httpAddr := flag.String("http", "", "serve the streamable HTTP transport on this address (e.g. 127.0.0.1:8082) instead of stdio; requires PULS_MCP_TOKEN or OAuth (PULS_MCP_OAUTH_SECRET, PULS_MCP_URL, PULS_MCP_OAUTH_ISSUER)")
+	httpAddr := flag.String("http", "", "serve the streamable HTTP transport on this address (e.g. 127.0.0.1:8082) instead of stdio; requires PULS_MCP_TOKEN or OAuth (PULS_AUTH_PUBLIC_KEYS_FILE, PULS_MCP_URL, PULS_MCP_OAUTH_ISSUER)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -175,7 +175,7 @@ func run(httpAddr string, logger *slog.Logger) error {
 	}
 	if httpAddr != "" {
 		if cfg.mcpToken == "" && cfg.oauth == nil {
-			return errors.New("PULS_MCP_TOKEN (or OAuth: PULS_MCP_OAUTH_SECRET, PULS_MCP_URL, PULS_MCP_OAUTH_ISSUER) must be set to serve --http: it is the only thing between the network and the health data")
+			return errors.New("PULS_MCP_TOKEN (or OAuth: PULS_AUTH_PUBLIC_KEYS_FILE, PULS_MCP_URL, PULS_MCP_OAUTH_ISSUER) must be set to serve --http: it is the only thing between the network and the health data")
 		}
 		if err := refusePlaceholder("PULS_MCP_TOKEN", cfg.mcpToken); err != nil {
 			return err
@@ -306,9 +306,8 @@ func (s *service) httpHandler(server *mcp.Server, authn authenticator, trustProx
 //     receive the 401 and its resource_metadata. It guesses nothing and the
 //     challenge holds no secret, so it is never refused by the limiter nor
 //     charged.
-//   - A bearer whose HMAC this server's secret verifies (verifySigned) cannot
-//     be a guess. It is checked before the limiter — the check is constant
-//     time and costs about what the limiter does — so a valid access token is
+//   - A bearer whose Ed25519 signature an active public key verifies (verifySigned) cannot
+//     be a guess. Its bounded verification runs before the limiter, so a valid access token is
 //     admitted even from an exhausted address, and a signed but invalid one
 //     (expired, which every connector presents each time its token lapses;
 //     wrong audience; ...) is a 401 invalid_token, uncharged.
@@ -332,7 +331,15 @@ func bearerAuth(authn authenticator, limiter *failureLimiter, trustProxyHeaders 
 			refuse(false, "no bearer")
 			return
 		}
-		info, reason, signed := authn.verifySigned(got)
+		info, verificationError, signed := authn.verifySigned(got)
+		if errors.Is(verificationError, errOAuthKeys) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization unavailable"})
+			return
+		}
+		reason := ""
+		if verificationError != nil {
+			reason = verificationError.Error()
+		}
 		if signed {
 			if info != nil {
 				admit(info)

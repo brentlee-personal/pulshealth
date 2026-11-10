@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { isUuid } from "@/lib/uuid";
 import { query } from "@/lib/db";
-import { healthResource, oauthConfig } from "@/lib/oauth/config";
+import { healthResource, readOAuthConfig } from "@/lib/oauth/config";
 import { verifyAccessToken } from "@/lib/oauth/jwt";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +19,10 @@ const answer = (status: number, body: unknown) => Response.json(body, {
 
 /** Public bearer-only API. The account comes exclusively from the verified token. */
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
-  const config = oauthConfig();
-  if (!config) return answer(404, { error: "not_found" });
+  const setting = readOAuthConfig();
+  if (setting.state === "off") return answer(404, { error: "not_found" });
+  if (setting.state === "invalid") return answer(503, { error: "authorization_unavailable" });
+  const config = setting.config;
   const authorization = request.headers.get("authorization") ?? "";
   const claims = authorization.startsWith("Bearer ")
     ? verifyAccessToken(authorization.slice(7), { ...config, resource: healthResource(config) }) : null;

@@ -1,3 +1,4 @@
+import { oauthKeyFixture } from "../oauth/keyFixture";
 // Every app/api route handler and both server actions, refusing what accounts
 // mode says they must refuse (docs/deep-review-2026-10.md §6 #7):
 //
@@ -24,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { NextRequest, type NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const oauthKeys = oauthKeyFixture();
 const db = vi.hoisted(() => {
   const refuse = vi.fn(async () => {
     throw new Error("the database was reached on a refusal path");
@@ -196,7 +198,8 @@ async function proxy(req: NextRequest): Promise<Response> {
   if (req.nextUrl.pathname.startsWith("/api/health/")) {
     process.env.WEB_PUBLIC_URL = "https://viewer.example";
     process.env.PULS_MCP_URL = "https://mcp.example/mcp";
-    process.env.PULS_MCP_OAUTH_SECRET = "s".repeat(64);
+    delete process.env.PULS_MCP_OAUTH_SECRET;
+    Object.assign(process.env, oauthKeys.env);
   }
   const { default: run } = await import("@/proxy");
   return run(req);
@@ -418,7 +421,8 @@ describe("the OAuth consent decision", () => {
   it("never connects an assistant to the demo account", async () => {
     process.env.WEB_PUBLIC_URL = "https://viewer.example";
     process.env.PULS_MCP_URL = "https://mcp.example/mcp";
-    process.env.PULS_MCP_OAUTH_SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
+    delete process.env.PULS_MCP_OAUTH_SECRET;
+  Object.assign(process.env, oauthKeys.env);
     const { POST } = await import("@/app/oauth/authorize/decision/route");
     const body = new FormData();
     for (const [k, v] of [

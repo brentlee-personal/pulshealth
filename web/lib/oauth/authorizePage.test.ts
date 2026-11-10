@@ -1,3 +1,4 @@
+import { oauthKeyFixture } from "./keyFixture";
 // The consent page (app/oauth/authorize/page.tsx), rendered to HTML with the
 // session and the client store mocked: an invalid request from a registered
 // client is an error page with a link back, never a redirect (RFC 9700
@@ -8,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+const oauthKeys = oauthKeyFixture();
 const store = vi.hoisted(() => ({ findClient: vi.fn() }));
 const viewer = vi.hoisted(() => ({ currentSession: vi.fn() }));
 const navigation = vi.hoisted(() => ({
@@ -42,7 +44,8 @@ beforeAll(() => {
   process.env.WEB_ACCOUNTS = "true";
   process.env.WEB_PUBLIC_URL = ISSUER;
   process.env.PULS_MCP_URL = MCP;
-  process.env.PULS_MCP_OAUTH_SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
+  delete process.env.PULS_MCP_OAUTH_SECRET;
+  Object.assign(process.env, oauthKeys.env);
 });
 afterAll(() => {
   process.env = saved;

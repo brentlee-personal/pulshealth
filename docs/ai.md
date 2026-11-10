@@ -247,12 +247,14 @@ For your own cloud-accessible connector, configure:
   person's account bound to their synced user ID.
 - A public HTTPS viewer URL and a public HTTPS MCP URL. A private tailnet URL
   cannot be reached by a cloud client.
-- These settings in `server/.env` (generate a fresh secret locally):
+- Separate signing and public files, created with `make web-keys ARGS='key-v1'`. See [Signing keys](auth-keys.md), then configure file references in `server/.env`:
 
 ```dotenv
 WEB_ACCOUNTS=true
 WEB_PUBLIC_URL=https://viewer.example.com
-PULS_MCP_OAUTH_SECRET=REPLACE_WITH_A_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS
+PULS_AUTH_KEY_ID=key-v1
+PULS_AUTH_PRIVATE_KEY_FILE=/auth-keys/key-v1.pem
+PULS_AUTH_PUBLIC_KEYS_FILE=/auth-public/key-v1.json
 PULS_MCP_URL=https://mcp.example.com/mcp
 ```
 

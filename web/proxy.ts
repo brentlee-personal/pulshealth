@@ -6,7 +6,7 @@ import { findSession, SESSION_COOKIE, sessionCookieAttributes } from "@/lib/acco
 import { AUTH_REALM, authorize } from "@/lib/auth";
 import { isUuid } from "@/lib/uuid";
 import { demoUserId, trustProxyHeaders, viewerMode } from "@/lib/mode";
-import { isOAuthPath, OAUTH_AUTHORIZE_PATH, OAUTH_DECISION_PATH, oauthConfig } from "@/lib/oauth/config";
+import { isOAuthPath, OAUTH_AUTHORIZE_PATH, OAUTH_DECISION_PATH, readOAuthConfig } from "@/lib/oauth/config";
 import { redirectOrigin } from "@/lib/oauth/validate";
 import { contentSecurityPolicy, newNonce } from "@/lib/securityHeaders";
 import { PATH_HEADER } from "@/lib/shell";
@@ -67,10 +67,13 @@ export default async function proxy(request: NextRequest) {
   }
   const csp = contentSecurityPolicy(nonce, development, formActions);
 
-  if (oauthPath && !oauthConfig()) {
-    const off = text(404, "Not found");
-    off.headers.set("Content-Security-Policy", csp);
-    return off;
+  if (oauthPath) {
+    const setting = readOAuthConfig();
+    if (setting.state !== "on") {
+      const blocked = setting.state === "off" ? text(404, "Not found") : text(503, "Authorization unavailable");
+      blocked.headers.set("Content-Security-Policy", csp);
+      return blocked;
+    }
   }
 
   const response =
