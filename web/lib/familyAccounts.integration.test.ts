@@ -121,6 +121,7 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
         exposed = rows.at(0)?.count === 1;
       }
     }
+    expect(exposed, "an invitation must not expose a pre-existing member's workout").toBe(false);
     expect({ rejected: cli.status === 2, issuedLink: Boolean(token), exposed }).toEqual({
       rejected: true, issuedLink: false, exposed: false,
     });
