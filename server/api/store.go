@@ -13,12 +13,6 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
-	// No user lives here: every read takes the user it is for as an
-	// argument, settled per request by the scopeUser middleware in main.go
-	// (the ?user= parameter, else PULS_USER_ID). One Store serves everyone
-	// the database holds.
-	// Deployment fallback retained for startup and legacy configuration.
-	// Calendar reads resolve the selected account through UserLocation.
 	loc *time.Location
 	// The clock the summary's "today" is read from; time.Now outside tests.
 	now func() time.Time
@@ -137,7 +131,7 @@ type WorkoutDetail struct {
 }
 
 func (st *Store) Profile(ctx context.Context, userID string) (*Profile, error) {
-	row := st.pool.QueryRow(ctx, `
+	row := st.readDB(ctx).QueryRow(ctx, `
 		SELECT id::text, name, email,
 		       (extract(epoch FROM (dob::timestamp AT TIME ZONE 'UTC')) * 1000)::bigint,
 		       biological_sex, puls_user_time_zone(id)
@@ -162,7 +156,7 @@ func (st *Store) Profile(ctx context.Context, userID string) (*Profile, error) {
 }
 
 func (st *Store) CatalogTypes(ctx context.Context, userID string) ([]CatalogType, error) {
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		WITH per_table AS (
 			SELECT st.identifier, st.kind, st.unit,
 			       count(*)::bigint AS raw_rows, 0::bigint AS aggregate_rows,
@@ -267,7 +261,7 @@ func (st *Store) CatalogTypes(ctx context.Context, userID string) ([]CatalogType
 }
 
 func (st *Store) LatestMetrics(ctx context.Context, userID string, types []string) ([]LatestMetric, error) {
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT DISTINCT ON (st.identifier)
 		       st.identifier, st.unit, q.value::float8,
 		       (extract(epoch FROM q.start_ts) * 1000)::bigint AS t
@@ -315,7 +309,7 @@ func (st *Store) DailyMetrics(ctx context.Context, userID string, f DailyFilters
 	// Ordered by the position of each identifier in the request, then by
 	// day: the same order the response nests, so LIMIT/OFFSET pages are
 	// contiguous slices of what an unpaged answer would be.
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT md.identifier, st.unit, md.day::text, md.value::float8
 		FROM metric_daily md
 		JOIN sample_types st ON st.type_id = md.type_id
@@ -373,7 +367,7 @@ func (st *Store) ActivitySummary(ctx context.Context, userID string, start, end 
 		return nil, err
 	}
 
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT date::text, move_kcal::float8, move_goal_kcal::float8,
 		       exercise_min::float8, exercise_goal_min::float8,
 		       stand_hours::float8, stand_goal_hours::float8, move_mode,
@@ -437,7 +431,7 @@ const workoutSummarySQL = `
 // match — what the export passes; Workouts passes the endpoint's page size.
 // fn's error stops the scan and comes back unchanged.
 func (st *Store) StreamWorkouts(ctx context.Context, userID string, filters WorkoutFilters, fn func(WorkoutSummary) error) error {
-	rows, err := st.pool.Query(ctx, workoutSummarySQL,
+	rows, err := st.readDB(ctx).Query(ctx, workoutSummarySQL,
 		userID,
 		filters.Start,
 		filters.End,
@@ -484,7 +478,7 @@ func nullableLimit(limit int) *int {
 }
 
 func (st *Store) Workout(ctx context.Context, userID, uuid string) (*WorkoutDetail, error) {
-	row := st.pool.QueryRow(ctx, `
+	row := st.readDB(ctx).QueryRow(ctx, `
 		SELECT w.uuid::text, w.activity_type, w.start_ts, w.end_ts,
 		       w.duration_s::float8, w.distance_m::float8, w.energy_kcal::float8,
 		       EXISTS (SELECT 1 FROM workout_route_points r WHERE r.workout_uuid = w.uuid AND r.user_id = w.user_id) AS has_route,

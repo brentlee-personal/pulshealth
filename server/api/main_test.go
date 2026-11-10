@@ -149,6 +149,10 @@ func (f *fakeStore) Summary(_ context.Context, user string, days int) (*SummaryD
 	return f.summary, nil
 }
 
+func (f *fakeStore) ReadScope(ctx context.Context, _ *apiAuthority) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
 func (f *fakeStore) Ping(ctx context.Context) error {
 	f.pings.Add(1)
 	if err := ctx.Err(); err != nil {

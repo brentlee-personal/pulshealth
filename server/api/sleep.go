@@ -124,7 +124,7 @@ func (st *Store) SleepDaily(ctx context.Context, userID string, start, end time.
 		return nil, badRequestf("range covers %d days; at most %d days per request", days, maxSleepDays)
 	}
 
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT c.start_ts, c.end_ts, cl.enum_name, COALESCE(c.source_id, 0)::int
 		FROM category_samples c
 		JOIN sample_types st ON st.type_id = c.type_id

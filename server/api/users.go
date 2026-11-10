@@ -37,7 +37,7 @@ type UsersResponse struct {
 }
 
 func (st *Store) Users(ctx context.Context, member string) ([]User, error) {
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT id::text, puls_user_time_zone(id) FROM users WHERE id=$1`, member)
 	if err != nil {
 		return nil, err

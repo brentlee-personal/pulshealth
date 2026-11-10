@@ -208,37 +208,22 @@ BEGIN
 END
 $$;
 
--- Keep product API credentials scoped to the exact current query surface.
--- `sources` names the device or app behind a raw sample and `category_labels`
--- decodes a category sample's integer value; both joined by /v1/samples and
--- /v1/sleep/daily. `batches` is the upload log /v1/users aggregates per user
--- (last sync, batch and sample counts); it holds no credential — the token
--- that wrote a batch is only an integer id into device_tokens, which stays
--- off this list. An install created before those endpoints picks the tables
--- up on its next migrate run, because this file runs every time.
-GRANT SELECT ON TABLE
-  users,
-  batches,
-  sources,
-  sample_types,
-  category_labels,
-  quantity_samples,
-  category_samples,
-  workouts,
-  heartbeat_series,
-  ecg_samples,
-  state_of_mind,
-  medication_dose_events,
-  activity_summaries,
-  aggregate_series,
-  aggregate_samples,
-  metric_daily,
-  workout_route_points,
-  workout_series_points
-TO api_reader;
-
+-- Health relations are visible only through credential-scoped views.
 DO $$
 BEGIN
+  IF to_regprocedure('public.puls_create_api_views()') IS NOT NULL THEN
+    PERFORM public.puls_create_api_views();
+    GRANT USAGE ON SCHEMA api TO api_reader;
+    GRANT EXECUTE ON FUNCTION api.read_scope() TO api_reader;
+    GRANT SELECT ON TABLE
+      api.users, api.sources, api.sample_types, api.category_labels,
+      api.quantity_samples, api.category_samples, api.workouts,
+      api.heartbeat_series, api.ecg_samples, api.state_of_mind,
+      api.medication_dose_events, api.activity_summaries,
+      api.aggregate_series, api.aggregate_samples, api.metric_daily,
+      api.workout_route_points, api.workout_series_points TO api_reader;
+    EXECUTE format('ALTER ROLE api_reader IN DATABASE %I SET search_path = api, public', current_database());
+  END IF;
   IF to_regprocedure('auth.resolve_api_credential(bytea)') IS NOT NULL THEN
     GRANT USAGE ON SCHEMA auth TO api_reader;
     GRANT EXECUTE ON FUNCTION auth.resolve_api_credential(bytea) TO api_reader;
@@ -246,201 +231,102 @@ BEGIN
 END
 $$;
 
--- Prove the direct ACL and role configuration are exact before committing.
--- PUBLIC grants from extensions may still be effective; this assertion makes
--- sure api_reader itself never receives extra privileges.
 DO $$
 DECLARE
   api_oid oid := (SELECT oid FROM pg_roles WHERE rolname = 'api_reader');
+  scoped boolean := to_regprocedure('api.read_scope()') IS NOT NULL;
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_roles
-    WHERE oid = api_oid
-      AND rolcanlogin
-      AND NOT rolsuper
-      AND NOT rolinherit
-      AND NOT rolcreaterole
-      AND NOT rolcreatedb
-      AND NOT rolreplication
-      AND NOT rolbypassrls
-      AND rolconnlimit = -1
-      AND rolconfig IS NULL
+    SELECT 1 FROM pg_roles WHERE oid=api_oid AND rolcanlogin
+      AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole
+      AND NOT rolcreatedb AND NOT rolreplication AND NOT rolbypassrls
+      AND rolconnlimit=-1 AND rolconfig IS NULL
   ) THEN
     RAISE EXCEPTION 'api_reader role attributes are not exact';
   END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM pg_auth_members WHERE roleid = api_oid OR member = api_oid
-  ) OR EXISTS (
-    SELECT 1 FROM pg_shdepend
-    WHERE refclassid = 'pg_authid'::regclass
-      AND refobjid = api_oid
-      AND deptype = 'o'
-  ) OR EXISTS (
-    SELECT 1 FROM pg_db_role_setting WHERE setrole = api_oid
-  ) THEN
-    RAISE EXCEPTION 'api_reader has memberships, ownership, or database settings';
+  IF EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid=api_oid OR member=api_oid)
+     OR EXISTS (SELECT 1 FROM pg_shdepend WHERE refclassid='pg_authid'::regclass
+                  AND refobjid=api_oid AND deptype='o') THEN
+    RAISE EXCEPTION 'api_reader has memberships or owns objects';
   END IF;
-
   IF EXISTS (
-    WITH expected_public(nspname, relname, privilege_type, is_grantable) AS (VALUES
-      ('public', 'users', 'SELECT', false),
-      ('public', 'batches', 'SELECT', false),
-      ('public', 'sources', 'SELECT', false),
-      ('public', 'sample_types', 'SELECT', false),
-      ('public', 'category_labels', 'SELECT', false),
-      ('public', 'quantity_samples', 'SELECT', false),
-      ('public', 'category_samples', 'SELECT', false),
-      ('public', 'workouts', 'SELECT', false),
-      ('public', 'heartbeat_series', 'SELECT', false),
-      ('public', 'ecg_samples', 'SELECT', false),
-      ('public', 'state_of_mind', 'SELECT', false),
-      ('public', 'medication_dose_events', 'SELECT', false),
-      ('public', 'activity_summaries', 'SELECT', false),
-      ('public', 'aggregate_series', 'SELECT', false),
-      ('public', 'aggregate_samples', 'SELECT', false),
-      ('public', 'metric_daily', 'SELECT', false),
-      ('public', 'workout_route_points', 'SELECT', false),
-      ('public', 'workout_series_points', 'SELECT', false)
-    ), allowed_hypertables(hypertable_schema, hypertable_name) AS (VALUES
-      ('public', 'quantity_samples'),
-      ('public', 'workout_route_points'),
-      ('public', 'workout_series_points')
-    ),
-    -- TimescaleDB copies a hypertable's ACL onto the relations that store
-    -- it, so api_reader must hold exactly SELECT on each of them and on
-    -- nothing else in _timescaledb_internal. They are named through public,
-    -- version-stable catalogs only — _timescaledb_catalog's layout changed
-    -- between 2.27 and 2.29 and broke the previous version of this check.
-    -- Two kinds of relation:
-    --   1. chunks, listed by timescaledb_information.chunks;
-    --   2. columnstore storage: the table holding a chunk's compressed rows
-    --      (2.29: <chunk>_compressed; up to 2.28: compress_hyper_N_M_chunk
-    --      under a _compressed_hypertable_N parent — an upgraded database
-    --      keeps the old-style chunks, with their grants, next to new-style
-    --      ones). No public view names these, so they are recognised by a
-    --      structure that has been stable since compression shipped: a
-    --      table in _timescaledb_internal carrying TimescaleDB's _ts_meta_*
-    --      bookkeeping columns whose remaining columns are exactly the
-    --      column set of one allowed hypertable. (A future hypertable with
-    --      an identical column set that api_reader may not read would make
-    --      this check fail loudly rather than pass silently.)
-    allowed_chunks(nspname, relname) AS (
-      SELECT ch.chunk_schema::text, ch.chunk_name::text
-      FROM timescaledb_information.chunks ch
-      JOIN allowed_hypertables ah
-        ON ah.hypertable_schema = ch.hypertable_schema::text
-       AND ah.hypertable_name = ch.hypertable_name::text
-    ), allowed_column_sets(cols) AS (
-      SELECT array_agg(a.attname::text ORDER BY a.attname)
-      FROM allowed_hypertables ah
-      JOIN pg_class h
-        ON h.oid = format('%I.%I', ah.hypertable_schema, ah.hypertable_name)::regclass
-      JOIN pg_attribute a
-        ON a.attrelid = h.oid AND a.attnum > 0 AND NOT a.attisdropped
-      GROUP BY h.oid
-    ), allowed_columnstore(nspname, relname) AS (
-      SELECT n.nspname::text, c.relname::text
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = '_timescaledb_internal'
-        AND c.relkind = 'r'
-        AND EXISTS (SELECT 1 FROM pg_attribute a
-                    WHERE a.attrelid = c.oid AND a.attname = '_ts_meta_count')
-        AND (SELECT array_agg(a.attname::text ORDER BY a.attname)
-             FROM pg_attribute a
-             WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-               AND a.attname NOT LIKE '\_ts\_meta\_%')
-            IN (SELECT cols FROM allowed_column_sets)
-    ), managed_relations(nspname, relname, privilege_type, is_grantable) AS (
-      SELECT nspname, relname, 'SELECT', false FROM allowed_chunks
-      UNION
-      SELECT nspname, relname, 'SELECT', false FROM allowed_columnstore
-    ), expected AS (
-      SELECT * FROM expected_public
-      UNION
-      SELECT * FROM managed_relations
+    WITH expected(setdatabase, setconfig) AS (
+      SELECT oid, ARRAY['search_path=api, public'] FROM pg_database WHERE datname=current_database() AND scoped
     ), actual AS (
-      SELECT n.nspname, c.relname, acl.privilege_type, acl.is_grantable
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      CROSS JOIN LATERAL aclexplode(c.relacl) acl
-      WHERE acl.grantee = api_oid
-        -- Up to TimescaleDB 2.28 a compressed hypertable also had a
-        -- column-less parent table (_compressed_hypertable_N) that the grant
-        -- hook copied the ACL to. It stores nothing (each compressed chunk
-        -- carries its own columns), nothing public ties it to its
-        -- hypertable, and the 2.29 extension update drops it — so
-        -- non-grantable SELECT on such a table is tolerated, not required.
-        AND NOT (n.nspname = '_timescaledb_internal'
-                 AND c.relkind = 'r'
-                 AND acl.privilege_type = 'SELECT'
-                 AND NOT acl.is_grantable
-                 AND NOT EXISTS (SELECT 1 FROM pg_attribute a
-                                 WHERE a.attrelid = c.oid AND a.attnum > 0
-                                   AND NOT a.attisdropped))
+      SELECT setdatabase, setconfig FROM pg_db_role_setting WHERE setrole=api_oid
     )
     (SELECT * FROM expected EXCEPT SELECT * FROM actual)
-    UNION ALL
-    (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+  ) THEN
+    RAISE EXCEPTION 'api_reader database settings are not exact';
+  END IF;
+  IF EXISTS (
+    WITH expected(nspname,relname,privilege_type,is_grantable) AS (
+      SELECT 'api', name, 'SELECT', false FROM (VALUES
+        ('users'),('sources'),('sample_types'),('category_labels'),
+        ('quantity_samples'),('category_samples'),('workouts'),('heartbeat_series'),
+        ('ecg_samples'),('state_of_mind'),('medication_dose_events'),('activity_summaries'),
+        ('aggregate_series'),('aggregate_samples'),('metric_daily'),
+        ('workout_route_points'),('workout_series_points')
+      ) relations(name) WHERE scoped
+    ), actual AS (
+      SELECT n.nspname,c.relname,a.privilege_type,a.is_grantable
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE a.grantee=api_oid
+    )
+    (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+    UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected)
   ) THEN
     RAISE EXCEPTION 'api_reader relation ACL set is not exact';
   END IF;
-
   IF EXISTS (
-    WITH expected(nspname, privilege_type, is_grantable) AS (
-      VALUES ('public', 'USAGE', false)
-      UNION ALL SELECT 'auth', 'USAGE', false WHERE to_regprocedure('auth.resolve_api_credential(bytea)') IS NOT NULL
+    WITH expected(nspname,privilege_type,is_grantable) AS (
+      VALUES ('public','USAGE',false)
+      UNION ALL SELECT 'api','USAGE',false WHERE scoped
+      UNION ALL SELECT 'auth','USAGE',false WHERE to_regprocedure('auth.resolve_api_credential(bytea)') IS NOT NULL
     ), actual AS (
-      SELECT n.nspname, acl.privilege_type, acl.is_grantable
-      FROM pg_namespace n
-      CROSS JOIN LATERAL aclexplode(n.nspacl) acl
-      WHERE acl.grantee = api_oid
+      SELECT n.nspname,a.privilege_type,a.is_grantable FROM pg_namespace n
+      CROSS JOIN LATERAL aclexplode(n.nspacl) a WHERE a.grantee=api_oid
     )
     (SELECT * FROM expected EXCEPT SELECT * FROM actual)
-    UNION ALL
-    (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected)
   ) THEN
     RAISE EXCEPTION 'api_reader schema ACL set is not exact';
   END IF;
-
   IF EXISTS (
-    WITH expected(datname, privilege_type, is_grantable) AS (
-      VALUES (current_database(), 'CONNECT', false)
+    WITH expected(datname,privilege_type,is_grantable) AS (
+      VALUES (current_database(),'CONNECT',false)
     ), actual AS (
-      SELECT d.datname, acl.privilege_type, acl.is_grantable
-      FROM pg_database d
-      CROSS JOIN LATERAL aclexplode(d.datacl) acl
-      WHERE acl.grantee = api_oid
+      SELECT d.datname,a.privilege_type,a.is_grantable FROM pg_database d
+      CROSS JOIN LATERAL aclexplode(d.datacl) a WHERE a.grantee=api_oid
     )
     (SELECT * FROM expected EXCEPT SELECT * FROM actual)
-    UNION ALL
-    (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected)
   ) THEN
     RAISE EXCEPTION 'api_reader database ACL set is not exact';
   END IF;
-
   IF EXISTS (
-    SELECT 1 FROM pg_attribute a
-    CROSS JOIN LATERAL aclexplode(a.attacl) acl
-    WHERE acl.grantee = api_oid
+    WITH expected(function_oid,privilege_type,is_grantable) AS (
+      SELECT oid,'EXECUTE',false FROM pg_proc WHERE oid IN (
+        to_regprocedure('auth.resolve_api_credential(bytea)'),to_regprocedure('api.read_scope()'))
+    ), actual AS (
+      SELECT p.oid,a.privilege_type,a.is_grantable FROM pg_proc p
+      CROSS JOIN LATERAL aclexplode(p.proacl) a WHERE a.grantee=api_oid
+    )
+    (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+    UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected)
   ) OR EXISTS (
-    SELECT 1 FROM pg_proc p
-    CROSS JOIN LATERAL aclexplode(p.proacl) acl
-    WHERE acl.grantee = api_oid
-      AND NOT coalesce(p.oid = to_regprocedure('auth.resolve_api_credential(bytea)')
-        AND p.prosecdef AND p.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']
-        AND acl.privilege_type = 'EXECUTE' AND NOT acl.is_grantable, false)
+    SELECT 1 FROM pg_proc WHERE oid IN (
+      to_regprocedure('auth.resolve_api_credential(bytea)'),to_regprocedure('api.read_scope()'))
+      AND (NOT prosecdef OR NOT coalesce(proconfig @> ARRAY['search_path=pg_catalog, pg_temp'],false))
   ) OR EXISTS (
-    SELECT 1 FROM pg_type t
-    CROSS JOIN LATERAL aclexplode(t.typacl) acl
-    WHERE acl.grantee = api_oid
+    SELECT 1 FROM pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) acl WHERE acl.grantee=api_oid
   ) OR EXISTS (
-    SELECT 1 FROM pg_default_acl d
-    CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
-    WHERE acl.grantee = api_oid
+    SELECT 1 FROM pg_type t CROSS JOIN LATERAL aclexplode(t.typacl) acl WHERE acl.grantee=api_oid
+  ) OR EXISTS (
+    SELECT 1 FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) acl WHERE acl.grantee=api_oid
   ) THEN
-    RAISE EXCEPTION 'api_reader has unexpected column, function, type, or default ACLs';
+    RAISE EXCEPTION 'api_reader function or other ACL set is not exact';
   END IF;
 END
 $$;
@@ -853,10 +739,11 @@ if [[ "$(psql -X -q -tA --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                  AND to_regprocedure('auth.invite_new_member(bytea,text,boolean,integer)') IS NOT NULL
                  AND to_regprocedure('auth.reinvite_new_member(bytea,uuid,bytea,integer)') IS NOT NULL
                  AND to_regclass('auth.api_credentials') IS NOT NULL
+                 AND to_regprocedure('api.read_scope()') IS NOT NULL
                  AND to_regclass('auth.oauth_grants') IS NOT NULL
                  AND to_regclass('auth.account_deletions') IS NOT NULL
                  AND to_regclass('auth.password_resets') IS NOT NULL")" != t ]]; then
-  echo "099_read_roles: required account migrations through 044_personal_api_credentials.sql are not applied yet; skipping the web_app role."
+  echo "099_read_roles: required account migrations through 045_personal_api_views.sql are not applied yet; skipping the web_app role."
   exit 0
 fi
 
@@ -975,10 +862,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   auth.oauth_clients,
   auth.oauth_grants,
   auth.oauth_codes,
-  auth.api_credentials,
   auth.password_resets,
   auth.password_reset_limits
 TO web_app;
+
+GRANT INSERT ON TABLE auth.api_credentials TO web_app;
 
 -- The privileged steps of sign-up and self-service (016_web_signups.sql,
 -- 018_web_accounts_hardening.sql): each a SECURITY DEFINER function that
@@ -1090,10 +978,7 @@ BEGIN
       ('auth', 'oauth_codes', 'INSERT', false),
       ('auth', 'oauth_codes', 'UPDATE', false),
       ('auth', 'oauth_codes', 'DELETE', false),
-      ('auth', 'api_credentials', 'SELECT', false),
       ('auth', 'api_credentials', 'INSERT', false),
-      ('auth', 'api_credentials', 'UPDATE', false),
-      ('auth', 'api_credentials', 'DELETE', false),
       ('auth', 'password_resets', 'SELECT', false),
       ('auth', 'password_resets', 'INSERT', false),
       ('auth', 'password_resets', 'UPDATE', false),

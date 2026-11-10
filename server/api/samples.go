@@ -72,7 +72,7 @@ type SamplesPage struct {
 func (st *Store) SampleType(ctx context.Context, identifier string) (SampleMeta, error) {
 	meta := SampleMeta{Type: identifier}
 	var kind *string
-	err := st.pool.QueryRow(ctx, `
+	err := st.readDB(ctx).QueryRow(ctx, `
 		SELECT type_id, kind, unit FROM sample_types WHERE identifier = $1`, identifier).
 		Scan(&meta.TypeID, &kind, &meta.Unit)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +103,7 @@ func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMe
 	)
 	switch meta.Kind {
 	case "quantity":
-		rows, err = st.pool.Query(ctx, `
+		rows, err = st.readDB(ctx).Query(ctx, `
 			SELECT q.uuid::text, q.start_ts, q.end_ts, q.value::float8, s.name
 			FROM quantity_samples q
 			LEFT JOIN sources s ON s.source_id = q.source_id
@@ -118,7 +118,7 @@ func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMe
 		// Category values are only meaningful with their type; the label
 		// join is keyed on the identifier so the same integer decodes
 		// differently for sleep and for a symptom.
-		rows, err = st.pool.Query(ctx, `
+		rows, err = st.readDB(ctx).Query(ctx, `
 			SELECT c.uuid::text, c.start_ts, c.end_ts, c.value::float8, s.name, cl.label
 			FROM category_samples c
 			LEFT JOIN sources s ON s.source_id = c.source_id

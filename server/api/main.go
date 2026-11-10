@@ -58,6 +58,7 @@ const (
 
 type apiStore interface {
 	Ping(context.Context) error
+	ReadScope(context.Context, *apiAuthority) (context.Context, func(), error)
 	Users(context.Context, string) ([]User, error)
 	// Every other read takes the user it is for as its second argument —
 	// explicit rather than baked into the store, so a handler cannot forget
@@ -190,6 +191,14 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	var databaseRole string
+	var scopedViews bool
+	if err := pool.QueryRow(ctx, "SELECT current_user, to_regprocedure('api.read_scope()') IS NOT NULL").Scan(&databaseRole, &scopedViews); err != nil {
+		return fmt.Errorf("personal API database: %w", err)
+	}
+	if databaseRole != "api_reader" || !scopedViews {
+		return errors.New("personal API requires api_reader and credential-scoped views")
+	}
 
 	// A zone that disagrees with the database's would cut every daily answer
 	// on different days than metric_daily and the dashboards, silently.
@@ -438,6 +447,17 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := context.WithValue(r.Context(), apiAuthorityKey{}, authority)
 		ctx = withRequestUser(ctx, authority.Principal.MemberID)
+		ctx, closeScope, err := s.store.ReadScope(ctx, authority)
+		if err != nil {
+			if errors.Is(err, errAPICredential) {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			} else {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization unavailable"})
+			}
+			return
+		}
+		defer closeScope()
 		next(w, r.WithContext(ctx))
 	}
 }

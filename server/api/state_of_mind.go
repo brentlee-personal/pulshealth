@@ -45,7 +45,7 @@ func (st *Store) StateOfMind(ctx context.Context, userID string, start, end time
 		return nil, badRequestf("range covers %d days; at most %d days per request", days, maxStateOfMindDays)
 	}
 
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT uuid::text, start_ts, kind, valence::float8, valence_class,
 		       COALESCE(labels, ARRAY[]::text[]), COALESCE(associations, ARRAY[]::text[])
 		FROM state_of_mind

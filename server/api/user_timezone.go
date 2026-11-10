@@ -20,7 +20,7 @@ func (st *Store) UserLocation(ctx context.Context, userID string) (*time.Locatio
 		return scoped.loc, nil
 	}
 	var name string
-	if err := st.pool.QueryRow(ctx, `SELECT puls_user_time_zone($1::uuid)`, userID).Scan(&name); err != nil {
+	if err := st.readDB(ctx).QueryRow(ctx, `SELECT puls_user_time_zone($1::uuid)`, userID).Scan(&name); err != nil {
 		return nil, fmt.Errorf("account time zone: %w", err)
 	}
 	loc, err := time.LoadLocation(name)

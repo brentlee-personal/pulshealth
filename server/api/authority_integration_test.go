@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
@@ -216,6 +217,55 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 			var denied *pgconn.PgError
 			if !errors.As(err, &denied) || denied.Code != "42501" {
 				t.Fatal("API database role could read a health base table directly")
+			}
+		})
+		t.Run("transaction identity and revocation", func(t *testing.T) {
+			config := store.pool.Config()
+			config.MaxConns = 1
+			pool, err := pgxpool.NewWithConfig(ctx, config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			personal := NewStore(pool, time.UTC)
+			authority, err := personal.authorizeAPI(ctx, bearer, claims.Issuer, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestCtx, cancel := context.WithCancel(ctx)
+			scopedCtx, closeScope, err := personal.ReadScope(requestCtx, authority)
+			if err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			defer closeScope()
+			var backend, nextBackend int
+			var readOnly string
+			if err := personal.readDB(scopedCtx).QueryRow(scopedCtx, "SELECT pg_backend_pid(),current_setting('transaction_read_only')").Scan(&backend, &readOnly); err != nil || readOnly != "on" {
+				t.Fatalf("request did not get a read-only transaction: %v", err)
+			}
+			var rows int
+			if err := personal.readDB(scopedCtx).QueryRow(scopedCtx, "SELECT count(*) FROM quantity_samples").Scan(&rows); err != nil || rows != 1 {
+				t.Fatalf("scoped input count=%d: %v", rows, err)
+			}
+			if _, err := admin.Exec(ctx, "UPDATE auth.api_credentials SET revoked_at=statement_timestamp() WHERE id=$1", credential); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_, _ = admin.Exec(ctx, "UPDATE auth.api_credentials SET revoked_at=NULL WHERE id=$1", credential)
+			}()
+			if err := personal.readDB(scopedCtx).QueryRow(scopedCtx, "SELECT count(*) FROM quantity_samples").Scan(&rows); err != nil || rows != 0 {
+				t.Fatalf("next statement retained revoked rows=%d: %v", rows, err)
+			}
+			httpCheck(http.StatusUnauthorized)
+			cancel()
+			closeScope()
+			var setting string
+			if err := pool.QueryRow(ctx, "SELECT pg_backend_pid(),coalesce(current_setting('puls.api_credential_hash',true),'')").Scan(&nextBackend, &setting); err != nil || backend != nextBackend || setting != "" {
+				t.Fatalf("cancelled request retained identity or lost its reusable connection: %v", err)
+			}
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM quantity_samples").Scan(&rows); err != nil || rows != 0 {
+				t.Fatalf("unscoped reused connection returned rows=%d: %v", rows, err)
 			}
 		})
 	})

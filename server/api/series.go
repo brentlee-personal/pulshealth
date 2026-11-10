@@ -68,7 +68,7 @@ type WorkoutSeriesResponse struct {
 // the workout does not exist for this user.
 func (st *Store) WorkoutSeries(ctx context.Context, userID, uuid string, types []string, maxPoints int) (*WorkoutSeriesResponse, error) {
 	var start, end time.Time
-	err := st.pool.QueryRow(ctx, `
+	err := st.readDB(ctx).QueryRow(ctx, `
 		SELECT start_ts, end_ts FROM workouts WHERE user_id = $1 AND uuid = $2`, userID, uuid).
 		Scan(&start, &end)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -87,7 +87,7 @@ func (st *Store) WorkoutSeries(ctx context.Context, userID, uuid string, types [
 
 	// workout_series_points is columnstore-compressed by workout_uuid for
 	// old chunks; the equality on it keeps the scan to one segment.
-	rows, err := st.pool.Query(ctx, `
+	rows, err := st.readDB(ctx).Query(ctx, `
 		SELECT st.identifier, st.unit, p.ts, p.value::float8
 		FROM workout_series_points p
 		JOIN sample_types st ON st.type_id = p.type_id
