@@ -1,9 +1,4 @@
-# Convenience targets for the reference server stack (server/docker-compose.yml)
-# and the pulshealth.com marketing site (site/).
-# Every stack target runs Compose against server/ so it works from the repository
-# root; ARGS passes extra flags through (e.g. `make bootstrap ARGS=--lan`,
-# `make logs ARGS=ingest`).
-
+# Internal personal-account services. Ingress and backup have separate gates.
 COMPOSE       := docker compose --project-directory server -f server/docker-compose.yml
 COMPOSE_BUILD := $(COMPOSE) -f server/compose.build.yml
 ARGS          ?=
@@ -12,73 +7,56 @@ ARGS          ?=
         backup backup-list restore site-dev site-build site-lint blog-check deploy-site
 
 help: ## List targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{ printf "  %-12s %s\n", $$1, $$2 }'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{ printf "  %-12s %s\\n", $$1, $$2 }'
 
-bootstrap: ## First run: create server/.env, start the stack, print the pairing block (ARGS=--lan|--url ...|--time-zone ...)
+bootstrap: ## Create non-secret settings and build internal services (ARGS='--url https://<private-origin>')
 	scripts/bootstrap.sh $(ARGS)
 
-up: ## Start (or update) the stack from the published images; migrate runs first
-	$(COMPOSE) up -d $(ARGS)
+up: ## Start already-built images for this exact checkout
+	DEPLOY_COMMIT=$$(git rev-parse HEAD) $(COMPOSE) up -d $(ARGS)
 
-down: ## Stop the stack (data volumes are kept; `down -v` would destroy them)
+down: ## Stop this stack and preserve its volumes
 	$(COMPOSE) down $(ARGS)
 
-pull: ## Pull the images for PULS_VERSION (then `make up` to switch to them)
-	$(COMPOSE) pull $(ARGS)
+pull: ## Published upstream shared-mode images are incompatible
+	@echo 'Build this checkout with make dev-up. Image release is a separate gate.' >&2; exit 1
 
-logs: ## Follow logs (ARGS=<service> for one service)
+logs: ## Follow bounded logs (ARGS=<service>)
 	$(COMPOSE) logs -f --tail=200 $(ARGS)
 
 ps: ## Container status
 	$(COMPOSE) ps $(ARGS)
 
-migrate: ## Apply pending schema migrations by hand (also runs on every `up`)
+migrate: ## Apply pending migrations using the one-shot protected-file role
 	$(COMPOSE) run --rm migrate
 
-baseline: ## Adopt a database created before the migrate service existed (one-time)
+baseline: ## Adopt an approved restored schema before applying pending migrations
 	$(COMPOSE) run --rm migrate baseline
 
-pairing: ## Re-print the pairing block (URL, token, user ID, QR) from server/.env
-	scripts/bootstrap.sh --print-pairing
+pairing: ## Pair through the signed-in member account
+	@echo 'Shared pairing is retired. Use the member account phone-pairing page.' >&2; exit 1
 
-issue-device: ## Issue a per-device token and print its pairing QR: NAME='My iPhone' (ARGS='--user <uuid>' for a non-default user)
-	@$(if $(strip $(NAME)),:,echo "usage: make issue-device NAME='<label, e.g. My iPhone>' [ARGS='--user <uuid>']"; exit 2)
-	scripts/bootstrap.sh --issue-device "$(NAME)" $(ARGS)
+issue-device: ## Explicit member only (NAME='<label>' USER_ID='<member UUID>')
+	@test -n "$(NAME)" -a -n "$(USER_ID)" || { echo "NAME and USER_ID are required" >&2; exit 2; }
+	$(COMPOSE) run --rm --no-deps ingest devices issue --user "$(USER_ID)" --name "$(NAME)" $(ARGS)
 
-# `issue` prints a QR code too, and the code needs the URL the phone will use,
-# which the container cannot work out — so it is handed in as PULS_PUBLIC_URL,
-# from the same rules the pairing block uses (the .env value, else the LAN
-# address under --lan; empty when there is none, and `issue` then says so).
-# An explicit --url in ARGS still wins. The emptiness check is make's, not the
-# shell's `test -n "$(ARGS)"`: a quoted label (--name "My iPhone") inside those
-# quotes splits into words and `test` fails on a perfectly good command.
-devices: ## Per-device tokens: ARGS='list [--all]' | 'issue --user <uuid> --name <label> [--url <url>] [--no-qr]' | 'revoke <id>' | 'rename <id> <label>'
-	@$(if $(strip $(ARGS)),:,echo "usage: make devices ARGS='list|issue --user <uuid> --name <label>|revoke <id>|rename <id> <label>'"; exit 2)
-	$(COMPOSE) run --rm --no-deps -e PULS_PUBLIC_URL="$$(scripts/bootstrap.sh --print-url 2>/dev/null || true)" ingest devices $(ARGS)
+devices: ## Explicit device commands (ARGS='list|issue --user <uuid> --name <label>|revoke <id>|rename <id> <label>')
+	@$(if $(strip $(ARGS)),:,echo "Explicit device command required" >&2; exit 2)
+	$(COMPOSE) run --rm --no-deps ingest devices $(ARGS)
 
-# Accounts mode only (WEB_ACCOUNTS=true): a one-time link that creates the
-# person's new member and viewer account. Runs inside the running web
-# container, so it uses that container's database role and WEB_PUBLIC_URL.
-web-invite: ## Invite a new member: ARGS='--email <address> [--admin] [--send]'
-	@$(if $(strip $(ARGS)),:,echo "usage: make web-invite ARGS='--email <address> [--admin] [--url https://<viewer host>]'"; exit 2)
+web-invite: ## Invite a new member (ARGS='--email <address> [--admin] [--send]')
+	@$(if $(strip $(ARGS)),:,echo "Explicit invite arguments required" >&2; exit 2)
 	$(COMPOSE) exec web node scripts/invite.mjs $(ARGS)
 
-web-keys: ## Create separate signing and public keys: ARGS='key-v1'
-	@$(if $(strip $(ARGS)),:,echo "usage: make web-keys ARGS='key-v1'"; exit 2)
+web-keys: ## Create a new signing key without replacing existing files (ARGS='key-v2')
+	@$(if $(strip $(ARGS)),:,echo "A new key ID is required" >&2; exit 2)
 	$(COMPOSE) exec web node scripts/auth-keys.mjs /auth-keys /auth-public $(ARGS)
 
-dev-up: ## Build the four app images from this checkout and start the stack
-	DEPLOY_COMMIT=$$(git rev-parse HEAD 2>/dev/null || echo unknown) $(COMPOSE_BUILD) up -d --build $(ARGS)
+dev-up: ## Build this checkout and start only its enabled internal services
+	DEPLOY_COMMIT=$$(git rev-parse HEAD) $(COMPOSE_BUILD) up -d --build $(ARGS)
 
-backup: ## Take one database dump now (scheduled dumps: docker compose --profile backup up -d backup)
-	$(COMPOSE) --profile backup run --rm backup once
-
-backup-list: ## List the dumps in the backup store
-	$(COMPOSE) --profile backup run --rm backup list
-
-restore: ## Restore a dump, DESTROYING the current database (FILE=<path or name from backup-list>)
-	@test -n "$(FILE)" || { echo "usage: make restore FILE=<dump path, or a name from 'make backup-list'>"; exit 1; }
-	server/backup/restore.sh $(ARGS) "$(FILE)"
+backup backup-list restore: ## Closed until encrypted backup and restore acceptance
+	@echo 'Encrypted backup and restore acceptance is pending. No backup or deletion was run.' >&2; exit 1
 
 # The marketing site (pulshealth.com). Distinct from web/, the self-hosted
 # viewer: site/ is a static export that reads knowledge-base/ and blog/ as

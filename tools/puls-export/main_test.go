@@ -22,6 +22,15 @@ import (
 // PULS_API_URL or PULS_API_TOKEN.
 func noEnv(string) string { return "" }
 
+func credentialFile(t *testing.T, value string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "personal-api-token")
+	if err := os.WriteFile(path, []byte(value+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // exportRecorder is a fake product API: it records the request it received
 // and answers with body.
 type exportRecorder struct {
@@ -77,7 +86,7 @@ func TestRunStreamsAnExportToAFile(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret",
+		"--url", api.server.URL, "--token-file", credentialFile(t, "secret"),
 		"--dataset", "activity", "--format", "csv",
 		"--start", "1767225600000", "--end", "1767312000000",
 		"-o", out,
@@ -120,7 +129,7 @@ func TestRunWritesToStdoutWithoutAnOutputFile(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret",
+		"--url", api.server.URL, "--token-file", credentialFile(t, "secret"),
 		"--dataset", "sleep", "--format", "jsonl",
 		"--start", "2026-01-01", "--end", "2026-02-01",
 	}, &stdout, &stderr, noEnv)
@@ -196,8 +205,7 @@ func (w *signalWriter) Write(p []byte) (int, error) {
 
 func (w *signalWriter) String() string { return w.buf.String() }
 
-// A rejected request must not touch the output file: the server's own message
-// is what the user sees, and yesterday's export is still there.
+// A rejection keeps yesterday's export and omits the external response body.
 func TestRunReportsTheAPIErrorAndLeavesTheOutputFileAlone(t *testing.T) {
 	t.Parallel()
 
@@ -210,7 +218,7 @@ func TestRunReportsTheAPIErrorAndLeavesTheOutputFileAlone(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret",
+		"--url", api.server.URL, "--token-file", credentialFile(t, "secret"),
 		"--dataset", "samples", "--type", "HKQuantityTypeIdentifierHeartRate",
 		"--start", "0", "--end", "9999999999",
 		"-o", out,
@@ -221,8 +229,8 @@ func TestRunReportsTheAPIErrorAndLeavesTheOutputFileAlone(t *testing.T) {
 	if errors.Is(err, errUsage) {
 		t.Errorf("err = %v, want a download failure (exit 1), not a usage error", err)
 	}
-	if !strings.Contains(err.Error(), "range must not exceed 31 days") {
-		t.Errorf("err = %v, want the API's own message", err)
+	if !strings.Contains(err.Error(), "400") || strings.Contains(err.Error(), "range must not exceed 31 days") {
+		t.Errorf("err = %v, want only the refusal status without the external body", err)
 	}
 	if got, _ := os.ReadFile(out); string(got) != "the previous export\n" {
 		t.Errorf("the output file was touched: %q", got)
@@ -242,10 +250,10 @@ func TestRunSaysTheTokenWasRejected(t *testing.T) {
 	api := newExportRecorder(t, http.StatusUnauthorized, `{"error":"unauthorized"}`)
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "wrong",
+		"--url", api.server.URL, "--token-file", credentialFile(t, "wrong"),
 		"--dataset", "sleep", "--start", "1", "--end", "2",
 	}, &stdout, &stderr, noEnv)
-	if err == nil || !strings.Contains(err.Error(), "PULS_API_TOKEN") {
+	if err == nil || !strings.Contains(err.Error(), "personal credential") {
 		t.Fatalf("err = %v, want it to name the token", err)
 	}
 }
@@ -258,33 +266,33 @@ func TestRunRejectsBadCommandLines(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"no dataset", []string{"--token", "t", "--start", "1", "--end", "2"}, "--dataset is required"},
-		{"no token", []string{"--dataset", "sleep", "--start", "1", "--end", "2"}, "PULS_API_TOKEN"},
-		{"no start", []string{"--dataset", "sleep", "--token", "t", "--end", "2"}, "--start is required"},
-		{"no end", []string{"--dataset", "sleep", "--token", "t", "--start", "1"}, "--end is required"},
+		{"no dataset", []string{"--token-file", credentialFile(t, "t"), "--start", "1", "--end", "2"}, "--dataset is required"},
+		{"no token", []string{"--dataset", "sleep", "--start", "1", "--end", "2"}, "PULS_API_TOKEN_FILE"},
+		{"no start", []string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--end", "2"}, "--start is required"},
+		{"no end", []string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "1"}, "--end is required"},
 		{
 			"a bound that is neither a date nor milliseconds",
-			[]string{"--dataset", "sleep", "--token", "t", "--start", "last tuesday", "--end", "2"},
+			[]string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "last tuesday", "--end", "2"},
 			"neither YYYY-MM-DD nor epoch milliseconds",
 		},
 		{
 			"a backwards range",
-			[]string{"--dataset", "sleep", "--token", "t", "--start", "2026-02-01", "--end", "2026-01-01"},
+			[]string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "2026-02-01", "--end", "2026-01-01"},
 			"--end must be after --start",
 		},
 		{
 			"a base URL that is not absolute",
-			[]string{"--dataset", "sleep", "--token", "t", "--start", "1", "--end", "2", "--url", "localhost:8081"},
+			[]string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "1", "--end", "2", "--url", "localhost:8081"},
 			"absolute http(s) URL",
 		},
 		{
 			"an unknown time zone",
-			[]string{"--dataset", "sleep", "--token", "t", "--start", "1", "--end", "2", "--time-zone", "Not/AZone"},
+			[]string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "1", "--end", "2", "--time-zone", "Not/AZone"},
 			"not a valid IANA time zone",
 		},
 		{
 			"a stray positional argument",
-			[]string{"--dataset", "sleep", "--token", "t", "--start", "1", "--end", "2", "sleep.csv"},
+			[]string{"--dataset", "sleep", "--token-file", credentialFile(t, "t"), "--start", "1", "--end", "2", "sleep.csv"},
 			`unexpected argument "sleep.csv"`,
 		},
 	}
@@ -311,9 +319,9 @@ func TestRunReadsTheEnvironment(t *testing.T) {
 
 	api := newExportRecorder(t, http.StatusOK, "date\n2026-01-01\n")
 	env := map[string]string{
-		"PULS_API_URL":   api.server.URL,
-		"PULS_API_TOKEN": "from-the-environment",
-		"PULS_TIME_ZONE": "Europe/Berlin",
+		"PULS_API_URL":        api.server.URL,
+		"PULS_API_TOKEN_FILE": credentialFile(t, "from-the-environment"),
+		"PULS_TIME_ZONE":      "Europe/Berlin",
 	}
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
@@ -399,82 +407,64 @@ func TestExportURLKeepsABasePath(t *testing.T) {
 	}
 }
 
-// --user (or $PULS_USER_ID) goes out as ?user=; without either the request
-// carries no user at all, so the server's own default applies — including on
-// a server that predates the parameter.
-func TestRunSendsTheUserOnlyWhenAsked(t *testing.T) {
+func TestRunHasNoMemberSelection(t *testing.T) {
 	t.Parallel()
-
-	const user = "7b1e4c2a-9d3f-4e5a-8b6c-0f1d2e3a4b5c"
 	api := newExportRecorder(t, http.StatusOK, "date\n2026-01-01\n")
 	var stdout, stderr bytes.Buffer
-
-	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret",
-		"--dataset", "activity", "--start", "1", "--end", "2",
-	}, &stdout, &stderr, noEnv)
-	if err != nil {
-		t.Fatalf("run: %v", err)
+	args := []string{"--url", api.server.URL, "--token-file", credentialFile(t, "personal"), "--dataset", "activity", "--start", "1", "--end", "2"}
+	if err := run(context.Background(), args, &stdout, &stderr, noEnv); err != nil {
+		t.Fatal(err)
 	}
-	if _, present := api.query["user"]; present {
-		t.Fatalf("query carries user=%q without --user or PULS_USER_ID", api.query.Get("user"))
+	if api.query.Has("user") {
+		t.Fatal("request selected a member")
 	}
-
-	err = run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret", "--user", user,
-		"--dataset", "activity", "--start", "1", "--end", "2",
-	}, &stdout, &stderr, noEnv)
-	if err != nil {
-		t.Fatalf("run with --user: %v", err)
+	for _, name := range []string{"PULS_API_TOKEN", "PULS_USER_ID", "PULS_MULTI_USER"} {
+		getenv := func(key string) string {
+			if key == name {
+				return "synthetic-private-value"
+			}
+			return ""
+		}
+		err := run(context.Background(), args, &stdout, &stderr, getenv)
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "synthetic-private-value") {
+			t.Fatal("retired setting accepted or disclosed")
+		}
 	}
-	if got := api.query.Get("user"); got != user {
-		t.Fatalf("user = %q, want %q", got, user)
-	}
-
-	// The environment stands in for the flag, and the flag wins over it.
-	env := map[string]string{"PULS_USER_ID": "5ea4d000-0000-4000-8000-000000000001"}
-	err = run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret",
-		"--dataset", "activity", "--start", "1", "--end", "2",
-	}, &stdout, &stderr, func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("run with PULS_USER_ID: %v", err)
-	}
-	if got := api.query.Get("user"); got != env["PULS_USER_ID"] {
-		t.Fatalf("user = %q, want the environment's %q", got, env["PULS_USER_ID"])
-	}
-	err = run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret", "--user", user,
-		"--dataset", "activity", "--start", "1", "--end", "2",
-	}, &stdout, &stderr, func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatalf("run with both: %v", err)
-	}
-	if got := api.query.Get("user"); got != user {
-		t.Fatalf("user = %q, want the flag's %q over the environment", got, user)
+	for _, retired := range [][]string{{"--token", "synthetic-private-value"}, {"--user", "other"}} {
+		if err := run(context.Background(), append(append([]string{}, args...), retired...), &stdout, &stderr, noEnv); err == nil {
+			t.Fatal("retired flag accepted")
+		}
 	}
 }
 
-// A 403 is the gate: the server only serves its own default user. Say so,
-// the way a 401 says the token is wrong, instead of leaving "Forbidden".
-func TestRunSaysMultiUserIsDisabledOnA403(t *testing.T) {
+func TestRunExplainsPersonalScopeRefusal(t *testing.T) {
 	t.Parallel()
-
-	api := newExportRecorder(t, http.StatusForbidden, `{"error":"multi-user reads are disabled"}`)
+	api := newExportRecorder(t, http.StatusForbidden, "{\"error\":\"synthetic-private-response\"}")
 	var stdout, stderr bytes.Buffer
-	err := run(context.Background(), []string{
-		"--url", api.server.URL, "--token", "secret", "--user", "7b1e4c2a-9d3f-4e5a-8b6c-0f1d2e3a4b5c",
-		"--dataset", "sleep", "--start", "1", "--end", "2",
-	}, &stdout, &stderr, noEnv)
-	if err == nil {
-		t.Fatalf("err = nil, want the 403 explained")
-	}
-	for _, want := range []string{"403", "multi-user reads are disabled", "PULS_MULTI_USER", "/v1/users"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err = %q, want it to mention %q", err, want)
-		}
+	err := run(context.Background(), []string{"--url", api.server.URL, "--token-file", credentialFile(t, "personal"),
+		"--dataset", "sleep", "--start", "1", "--end", "2"}, &stdout, &stderr, noEnv)
+	if err == nil || !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), "personal credential") || strings.Contains(err.Error(), "synthetic-private-response") {
+		t.Fatalf("unexpected refusal: %v", err)
 	}
 	if errors.Is(err, errUsage) {
-		t.Fatalf("a server refusal is not a usage error")
+		t.Fatal("server refusal is not a usage error")
+	}
+}
+
+func TestDownloadRefusesCredentialRedirect(t *testing.T) {
+	t.Parallel()
+	var received atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+	var stdout bytes.Buffer
+	err := download(context.Background(), http.DefaultClient, options{baseURL: redirect.URL, token: "personal", dataset: "sleep", format: "csv", start: 1, end: 2}, &stdout)
+	if err == nil || received.Load() != 0 || stdout.Len() != 0 {
+		t.Fatal("redirect forwarded a personal credential or wrote an export")
 	}
 }

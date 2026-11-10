@@ -4,12 +4,10 @@
 // It is a thin client for GET /v1/export on the product API (server/api): it
 // builds the query, sends the bearer token, and copies the response body
 // straight to a file or to standard output without ever holding the whole
-// export in memory. Everything the server can reject — an unknown dataset, a
-// range over the cap, an identifier that has never been synced — is left to
-// the server, and its error message is printed verbatim, so this binary
-// cannot drift out of step with the endpoint it calls.
+// export in memory. The server validates the personal credential and range.
+// Errors report status only, keeping external response bodies out of logs.
 //
-//	puls-export --url https://health.example.net --token "$PULS_API_TOKEN" \
+//	puls-export --url https://health.example.net --token-file /protected/personal-api-token \
 //	  --dataset sleep --format csv --start 2026-01-01 --end 2026-02-01 -o sleep.csv
 //
 // See docs/export.md.
@@ -17,7 +15,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,13 +28,12 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 	// Embed the IANA zone database so --time-zone resolves on a machine
 	// without /usr/share/zoneinfo.
 	_ "time/tzdata"
 )
 
-const defaultAPIURL = "http://127.0.0.1:8081"
+const defaultAPIURL = "http://api:8081"
 
 // version reports the module version a `go install` build carries, or "dev".
 func version() string {
@@ -98,10 +94,7 @@ type options struct {
 	types        string
 	sampleType   string
 	activityType string
-	// The user to export, sent as ?user=; empty leaves the choice to the
-	// server (its PULS_USER_ID).
-	user   string
-	output string
+	output       string
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) error {
@@ -120,8 +113,9 @@ Datasets: daily_metrics, samples, workouts, sleep, activity, state_of_mind.
 daily_metrics needs --types, samples needs --type. The server is the authority
 on both lists and reports what it accepts.
 
-The export is the server's default user unless --user (or $PULS_USER_ID) names
-another, which the server allows only with PULS_MULTI_USER=true.
+The credential selects its owner and allowed types, operations and time range.
+The API is internal. Use a protected personal credential file; member selection
+and shared credentials are refused.
 
 Examples:
   puls-export --dataset sleep --start 2026-01-01 --end 2026-02-01 -o sleep.csv
@@ -132,7 +126,7 @@ Examples:
 
 	var (
 		baseURL      = fs.String("url", "", "product API base URL (default $PULS_API_URL, else "+defaultAPIURL+")")
-		token        = fs.String("token", "", "bearer token (default $PULS_API_TOKEN)")
+		tokenFile    = fs.String("token-file", "", "protected personal credential file (default $PULS_API_TOKEN_FILE)")
 		dataset      = fs.String("dataset", "", "dataset to export (required)")
 		format       = fs.String("format", "csv", "csv or jsonl")
 		start        = fs.String("start", "", "range start: YYYY-MM-DD or epoch milliseconds (required)")
@@ -140,7 +134,6 @@ Examples:
 		types        = fs.String("types", "", "daily_metrics: comma-separated HealthKit identifiers")
 		sampleType   = fs.String("type", "", "samples: one HealthKit identifier")
 		activityType = fs.String("activity-type", "", "workouts: keep one activity type")
-		user         = fs.String("user", "", "user ID (UUID) to export; the server needs PULS_MULTI_USER=true for anyone but its default (default $PULS_USER_ID, else the server's own)")
 		zoneName     = fs.String("time-zone", "", "IANA zone the YYYY-MM-DD bounds are read in (default $PULS_TIME_ZONE, else UTC)")
 		output       = fs.String("o", "", "write to this file instead of standard output")
 		showVersion  = fs.Bool("version", false, "print the version and exit")
@@ -162,22 +155,27 @@ Examples:
 		return usagef("unexpected argument %q", fs.Arg(0))
 	}
 
+	for _, name := range []string{"PULS_API_TOKEN", "PULS_USER_ID", "PULS_MULTI_USER"} {
+		if getenv(name) != "" {
+			return usagef("%s is retired; use a personal credential file without member selection", name)
+		}
+	}
 	opts := options{
 		baseURL:      firstNonEmpty(*baseURL, getenv("PULS_API_URL"), defaultAPIURL),
-		token:        firstNonEmpty(*token, getenv("PULS_API_TOKEN")),
 		dataset:      strings.TrimSpace(*dataset),
 		format:       strings.TrimSpace(*format),
 		types:        strings.TrimSpace(*types),
 		sampleType:   strings.TrimSpace(*sampleType),
 		activityType: strings.TrimSpace(*activityType),
-		user:         firstNonEmpty(*user, getenv("PULS_USER_ID")),
 		output:       *output,
 	}
 	if opts.dataset == "" {
 		return usagef("--dataset is required")
 	}
-	if opts.token == "" {
-		return usagef("no token: pass --token or set PULS_API_TOKEN (the product API's bearer token, from server/.env)")
+	var err error
+	opts.token, err = readTokenFile(firstNonEmpty(*tokenFile, getenv("PULS_API_TOKEN_FILE")))
+	if err != nil {
+		return err
 	}
 
 	loc, err := loadTimeZone(firstNonEmpty(*zoneName, getenv("PULS_TIME_ZONE")))
@@ -213,7 +211,9 @@ func download(ctx context.Context, client *http.Client, opts options, stdout io.
 	}
 	req.Header.Set("Authorization", "Bearer "+opts.token)
 
-	resp, err := client.Do(req)
+	requestClient := *client
+	requestClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := requestClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("product API unreachable at %s: %w", opts.baseURL, err)
 	}
@@ -265,13 +265,10 @@ func exportURL(opts options) (string, error) {
 	}
 	// Each filter belongs to one dataset; sending it with another would be a
 	// 400 from a stricter server later, so only the relevant one goes out.
-	// user is absent unless asked for, so a server that predates it (or one
-	// with PULS_MULTI_USER off) keeps answering for its default user.
 	for name, value := range map[string]string{
 		"types":        opts.types,
 		"type":         opts.sampleType,
 		"activityType": opts.activityType,
-		"user":         opts.user,
 	} {
 		if value != "" {
 			query.Set(name, value)
@@ -283,37 +280,14 @@ func exportURL(opts options) (string, error) {
 	return endpoint.String(), nil
 }
 
-// apiError turns a non-200 answer into the error the user sees, preferring
-// the API's own {"error": "..."} message.
+// apiError omits external response bodies, which can contain private values.
 func apiError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-	message := strings.TrimSpace(string(body))
-	var payload struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(body, &payload) == nil && payload.Error != "" {
-		message = payload.Error
-	}
-	// Truncate on a rune boundary; cutting mid-rune would put a replacement
-	// character in the middle of the server's own message.
-	if len(message) > 500 {
-		cut := 500
-		for cut > 0 && !utf8.RuneStart(message[cut]) {
-			cut--
-		}
-		message = message[:cut] + "…"
-	}
 	err := fmt.Errorf("the product API answered %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
-	if message != "" {
-		err = fmt.Errorf("%w: %s", err, message)
-	}
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		err = fmt.Errorf("%w (the token does not match the API's PULS_API_TOKEN)", err)
+		err = fmt.Errorf("%w (the personal credential is invalid, expired or revoked; authorize again)", err)
 	case http.StatusForbidden:
-		// The only 403 the export endpoint sends: --user named someone other
-		// than the server's default while its gate is off.
-		err = fmt.Errorf("%w (the server only exports its PULS_USER_ID unless it runs with PULS_MULTI_USER=true; GET /v1/users lists what it serves)", err)
+		err = fmt.Errorf("%w (the export is outside the personal credential's permitted operation, types or time range)", err)
 	}
 	return err
 }

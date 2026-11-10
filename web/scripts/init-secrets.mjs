@@ -13,6 +13,14 @@ const retired = new Set([
   "PULS_USER_ID", "WEB_AUTH_PASSWORD", "WEB_DEMO_USER", "INGEST_DB_USER",
   "PULS_MCP_OAUTH_SECRET", "WEB_SES_ACCESS_KEY_ID", "WEB_SES_SECRET_ACCESS_KEY",
 ]);
+const settingsNames = new Set([
+  "WEB_PUBLIC_URL", "PULS_PUBLIC_URL", "PULS_TIME_ZONE", "TRUST_PROXY_HEADERS",
+  "WEB_CLIENT_IP_HEADER", "WEB_DB_POOL_SIZE", "WEB_SIGNUPS", "WEB_ACCOUNTS",
+  "PULS_AUTH_PRIVATE_KEY_FILE", "PULS_AUTH_PUBLIC_KEYS_FILE", "PULS_AUTH_KEY_ID",
+  "PULS_MCP_URL", "WEB_SES_ACCESS_KEY_ID_FILE", "WEB_SES_SECRET_ACCESS_KEY_FILE",
+  "WEB_SES_REGION", "WEB_MAIL_FROM", "WEB_ADMIN_EMAIL", "WEB_APP_STORE_ALERT_TO",
+  "WEB_PERSONAL_USERS", "PULS_DELETION_LEDGER_DIR", "PULS_MAX_INFLIGHT_BATCHES", "DEPLOY_COMMIT",
+]);
 
 export function validateSettings(path) {
   const info = lstatSync(path);
@@ -26,6 +34,7 @@ export function validateSettings(path) {
     seen.add(name);
     const value = raw.trim().replace(/^(['"])(.*)\1$/, "$2");
     if (retired.has(name) && value !== "") throw new Error(`Retired setting: ${name}`);
+    if (!settingsNames.has(name) && value !== "") throw new Error(`Unsupported setting: ${name}`);
     if (name === "WEB_ACCOUNTS" && value !== "" && value !== "true") throw new Error("Personal accounts cannot be disabled");
   }
 }

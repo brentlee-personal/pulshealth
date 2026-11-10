@@ -124,8 +124,6 @@ services:
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
     volumes:
       - ingest_secrets:/run/secrets/ingest:ro
-    ports:
-      - "127.0.0.1:8080:8080"
     healthcheck:
       <<: *health
       test: [CMD, /ingest, healthcheck]
@@ -187,8 +185,6 @@ services:
       - auth_signing:/auth-keys
       - auth_public:/auth-public
       - deletion_ledger:/deletion-ledger
-    ports:
-      - "127.0.0.1:3001:3000"
     healthcheck:
       <<: *health
       interval: 30s
