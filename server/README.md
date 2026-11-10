@@ -660,8 +660,8 @@ to the people you invite.
    be reached other than through a proxy that appends to
    `X-Forwarded-For`, read "Rate limiting" before turning it on.
 3. `docker compose up -d` (or `make dev-up`), then invite people:
-   `make issue-device NAME='…' ARGS='--user <uuid>'` for their phone, and
-   `make web-invite ARGS='--user <uuid> --email <address>'` for the viewer.
+   `make web-invite ARGS='--email <address>'` creates a fresh member and
+   one-time viewer link. They pair their own phone after signing in.
 
 While the viewer is invite-only, a second lock costs nothing: put Cloudflare
 Access (a one-time PIN to the invited addresses, or your identity provider) in

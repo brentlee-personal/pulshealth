@@ -12,6 +12,8 @@ const unclaimedMember = randomUUID();
 const unclaimedWorkout = randomUUID();
 const email = `${member}@synthetic.invalid`;
 const unclaimedEmail = `${unclaimedMember}@synthetic.invalid`;
+const newEmail = `${randomUUID()}@synthetic.invalid`;
+const createdMembers: string[] = [];
 const admin = new Client({ connectionString: adminUrl });
 
 describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", () => {
@@ -31,15 +33,13 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
   afterAll(async () => {
     await (await import("./db")).getPool()?.end();
     await (await import("./db")).getHealthPool()?.end();
-    await admin.query("DELETE FROM auth.invites WHERE user_id=$1", [member]);
-    await admin.query("DELETE FROM auth.sessions WHERE account_id IN (SELECT id FROM auth.accounts WHERE user_id=$1)", [member]);
-    await admin.query("DELETE FROM auth.accounts WHERE user_id=$1", [member]);
-    await admin.query("DELETE FROM users WHERE id=$1", [member]);
-    await admin.query("DELETE FROM workouts WHERE user_id=$1", [unclaimedMember]);
-    await admin.query("DELETE FROM auth.invites WHERE user_id=$1", [unclaimedMember]);
-    await admin.query("DELETE FROM auth.sessions WHERE account_id IN (SELECT id FROM auth.accounts WHERE user_id=$1)", [unclaimedMember]);
-    await admin.query("DELETE FROM auth.accounts WHERE user_id=$1", [unclaimedMember]);
-    await admin.query("DELETE FROM users WHERE id=$1", [unclaimedMember]);
+    for (const id of [member, unclaimedMember, ...createdMembers]) {
+      await admin.query("DELETE FROM workouts WHERE user_id=$1", [id]);
+      await admin.query("DELETE FROM auth.invites WHERE user_id=$1", [id]);
+      await admin.query("DELETE FROM auth.sessions WHERE account_id IN (SELECT id FROM auth.accounts WHERE user_id=$1)", [id]);
+      await admin.query("DELETE FROM auth.accounts WHERE user_id=$1", [id]);
+      await admin.query("DELETE FROM users WHERE id=$1", [id]);
+    }
     await admin.end();
   });
 
@@ -86,7 +86,7 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
       issuedBrowser: /__Host-puls-session=[^;\s]+/.test(response.headers.get("set-cookie") ?? ""),
       passwordPreserved: owner.password_preserved,
       browserPreserved: owner.browser_preserved,
-      cliRefused: cli.status === 1 && cli.stderr.includes("already has an account"),
+      cliRefused: cli.status === 2 && cli.stderr.includes("--user"),
       cliPrintedLink: cli.stdout.includes("/invite/"),
     }).toEqual({ refused: true, issuedBrowser: false, passwordPreserved: true, browserPreserved: true,
       cliRefused: true, cliPrintedLink: false });
@@ -125,5 +125,58 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
     expect({ rejected: cli.status === 2, issuedLink: Boolean(token), exposed }).toEqual({
       rejected: true, issuedLink: false, exposed: false,
     });
+  });
+
+  it("the invitation tool allocates a fresh member, signs it in and leaves old data sealed", async () => {
+    const cli = spawnSync(process.execPath, ["scripts/invite.mjs", "--email", newEmail], {
+      cwd: process.cwd(), env: process.env, encoding: "utf8", timeout: 10_000,
+    });
+    const pending = await admin.query<{ user_id: string; self_service: boolean; auto_zone: boolean }>(
+      `SELECT i.user_id::text, EXISTS(SELECT 1 FROM auth.self_service_users s WHERE s.user_id=i.user_id) AS self_service,
+              u.time_zone_auto_initialize AS auto_zone
+         FROM auth.invites i JOIN public.users u ON u.id=i.user_id WHERE i.email=$1`, [newEmail],
+    );
+    for (const row of pending.rows) createdMembers.push(row.user_id);
+    expect(cli.status).toBe(0);
+    expect(pending.rows).toHaveLength(1);
+    const identity = pending.rows.at(0);
+    if (!identity) throw new Error("New synthetic member was not created");
+    expect([member, unclaimedMember]).not.toContain(identity.user_id);
+    expect(identity.self_service).toBe(true);
+    expect(identity.auto_zone).toBe(true);
+    const token = /\/invite\/([A-Za-z0-9_-]{43})(?:\s|$)/.exec(cli.stdout)?.at(1);
+    if (!token) throw new Error("New member invitation link was not returned");
+    const { acceptInvite } = await import("./accounts/store");
+    const { hashPassword } = await import("./accounts/password");
+    const accepted = await acceptInvite(token, await hashPassword("synthetic fresh member passphrase"), { userAgent: null, ip: null }, null);
+    expect(accepted.ok).toBe(true);
+    if (!accepted.ok) return;
+    const { findSession } = await import("./accounts/session");
+    const signedIn = await findSession(accepted.sessionToken);
+    expect(signedIn?.userId).toBe(identity.user_id);
+    const { scoped } = await import("./db");
+    const visible = await scoped(identity.user_id, (q) => q<{ count: number }>("SELECT count(*)::int AS count FROM workouts"));
+    expect(visible.at(0)?.count).toBe(0);
+    const preserved = await admin.query<{ count: number }>("SELECT count(*)::int AS count FROM workouts WHERE uuid=$1 AND user_id=$2", [unclaimedWorkout, unclaimedMember]);
+    expect(preserved.rows.at(0)?.count).toBe(1);
+  });
+
+  it("rejects invalid new-member input without leaving a partial identity", async () => {
+    const { query } = await import("./db");
+    const { tokenHash, newToken } = await import("./accounts/session");
+    const duplicate = tokenHash(newToken());
+    const before = await admin.query<{ count: string }>("SELECT count(*) AS count FROM public.users");
+    for (const [hash, address, adminFlag, hours] of [
+      [null, newEmail, false, 48], [Buffer.alloc(1), newEmail, false, 48],
+      [duplicate, "UPPER@synthetic.invalid", false, 48], [duplicate, "invalid", false, 48],
+      [duplicate, newEmail, null, 48], [duplicate, newEmail, false, 0], [duplicate, newEmail, false, 337],
+    ]) {
+      await expect(query("SELECT * FROM auth.invite_new_member($1,$2,$3,$4)", [hash, address, adminFlag, hours]))
+        .rejects.toMatchObject({ code: "22023" });
+    }
+    await expect(query("SELECT * FROM auth.invite_new_member($1,$2,false,48)", [duplicate, email]))
+      .rejects.toMatchObject({ code: "23505" });
+    const after = await admin.query<{ count: string }>("SELECT count(*) AS count FROM public.users");
+    expect(after.rows).toEqual(before.rows);
   });
 });

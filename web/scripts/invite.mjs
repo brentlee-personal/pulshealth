@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 // Issues a one-time invite link for the web viewer's accounts mode.
 //
-//   docker compose exec web node scripts/invite.mjs --user <uuid> --email <address> [--admin]
+//   docker compose exec web node scripts/invite.mjs --email <address> [--admin]
 //                                                   [--url https://<viewer host>] [--hours 48] [--send]
-//   make web-invite ARGS='--user <uuid> --email <address> [--admin]'
+//   make web-invite ARGS='--email <address> [--admin]'
 //
 // The person opens the link, creates a new account and is signed in. Existing
 // accounts use owner-verified password recovery. The first administrator is
 // invited with --admin.
 //
-// The user must already exist in the database: issue the person's device
-// token first (`make issue-device NAME=… ARGS='--user <uuid>'`), which
-// creates the row, or let their phone sync once. Issuing a device token stays
-// a separate step on purpose — the viewer never hands out ingest credentials.
+// The database allocates a fresh member with the invite in one transaction.
+// No existing member id is accepted. After signing in, the person pairs
+// their own iPhone from their account.
 //
 // The token is 32 random bytes; only its SHA-256 is stored (auth.invites),
 // and the link is printed here once — or, with --send, emailed to the
@@ -21,19 +20,17 @@
 // --hours (48 by default). The base URL comes from --url, else WEB_PUBLIC_URL.
 //
 // Connects with the container's DATABASE_URL — in accounts mode, the web_app
-// role, which may write auth.invites and nothing that holds health data.
+// role, which may call the fixed new-member function, not write health tables.
 
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export const USAGE =
-  "usage: node scripts/invite.mjs --user <uuid> --email <address> [--admin] [--url https://<viewer host>] [--hours 48] [--send]";
+  "usage: node scripts/invite.mjs --email <address> [--admin] [--url https://<viewer host>] [--hours 48] [--send]";
 
 /** Parsed options, or { error } with a message for the operator. */
 export function parseArgs(argv, env = {}) {
-  const options = { user: null, email: null, admin: false, url: env.WEB_PUBLIC_URL || null, hours: 48, send: false };
+  const options = { email: null, admin: false, url: env.WEB_PUBLIC_URL || null, hours: 48, send: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
@@ -42,8 +39,7 @@ export function parseArgs(argv, env = {}) {
       return next;
     };
     try {
-      if (arg === "--user") options.user = value();
-      else if (arg === "--email") options.email = value();
+      if (arg === "--email") options.email = value();
       else if (arg === "--url") options.url = value();
       else if (arg === "--hours") options.hours = Number(value());
       else if (arg === "--admin") options.admin = true;
@@ -54,8 +50,6 @@ export function parseArgs(argv, env = {}) {
       return { error: e.message };
     }
   }
-  if (!options.user || !UUID.test(options.user)) return { error: "--user must be the user's UUID" };
-  options.user = options.user.toLowerCase();
   const email = normalizeEmail(options.email);
   if (!email) return { error: "--email must be an email address" };
   options.email = email;
@@ -154,7 +148,7 @@ async function main() {
     console.error(`invite: ${parsed.error}\n${USAGE}`);
     return 2;
   }
-  const { user, email, admin, url, hours, send } = parsed.options;
+  const { email, admin, url, hours, send } = parsed.options;
   if (!process.env.DATABASE_URL) {
     console.error("invite: DATABASE_URL is not set (run this inside the web container: docker compose exec web …)");
     return 1;
@@ -164,26 +158,12 @@ async function main() {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
-    const taken = await client.query(
-      "SELECT user_id::text FROM auth.accounts WHERE email = $1 AND user_id <> $2",
-      [email, user],
-    );
-    if (taken.rowCount) {
-      console.error(`invite: ${email} already signs in another user's account (${taken.rows[0].user_id}).`);
-      return 1;
-    }
-    const existing = await client.query("SELECT email FROM auth.accounts WHERE user_id = $1", [user]);
-    if (existing.rowCount) {
-      console.error("invite: this member already has an account. Use owner-verified password recovery; invitations cannot replace it.");
-      return 1;
-    }
     const { token, hash } = newInviteToken();
     const inserted = await client.query(
-      `INSERT INTO auth.invites (token_hash, user_id, email, is_admin, expires_at)
-       VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5))
-       RETURNING expires_at`,
-      [hash, user, email, admin, hours],
+      "SELECT user_id::text, expires_at FROM auth.invite_new_member($1, $2, $3, $4)",
+      [hash, email, admin, hours],
     );
+    const user = inserted.rows[0].user_id;
     const path = `/invite/${token}`;
     if (send) {
       const message = inviteMessage({ link: `${url}${path}`, expires: inserted.rows[0].expires_at });
@@ -205,15 +185,12 @@ async function main() {
     }
     return 0;
   } catch (e) {
-    if (e && e.code === "23503") {
-      console.error(
-        `invite: there is no user ${user} in the database yet. Issue the person's device token first ` +
-          "(make issue-device NAME='…' ARGS='--user <uuid>'), which creates the user, or let their phone sync once.",
-      );
+    if (e && e.code === "23505") {
+      console.error("invite: this address already has an account. Use owner-verified password recovery; invitations cannot replace it.");
       return 1;
     }
     if (e && e.code === "42501") {
-      console.error("invite: this database role may not write invites. The web container must connect as web_app (accounts mode).");
+      console.error("invite: this database role may not create member invitations. The web container must connect as web_app.");
       return 1;
     }
     if (e && e.code === "3F000") {

@@ -7,27 +7,27 @@ const USER = "11111111-1111-4111-8111-111111111111";
 
 describe("scripts/invite.mjs", () => {
   it("parses a complete invite", () => {
-    expect(parseArgs(["--user", USER.toUpperCase(), "--email", " Ann@Example.com ", "--admin"], {})).toEqual({
-      options: { user: USER, email: "ann@example.com", admin: true, url: null, hours: 48, send: false },
+    expect(parseArgs(["--email", " Ann@Example.com ", "--admin"], {})).toEqual({
+      options: { email: "ann@example.com", admin: true, url: null, hours: 48, send: false },
     });
   });
 
   it("takes the base URL from WEB_PUBLIC_URL unless --url says otherwise", () => {
-    expect(parseArgs(["--user", USER, "--email", "a@example.com"], { WEB_PUBLIC_URL: "https://viewer.example/x" }).options?.url)
+    expect(parseArgs(["--email", "a@example.com"], { WEB_PUBLIC_URL: "https://viewer.example/x" }).options?.url)
       .toBe("https://viewer.example");
     expect(
-      parseArgs(["--user", USER, "--email", "a@example.com", "--url", "https://other.example"], { WEB_PUBLIC_URL: "https://viewer.example" })
+      parseArgs(["--email", "a@example.com", "--url", "https://other.example"], { WEB_PUBLIC_URL: "https://viewer.example" })
         .options?.url,
     ).toBe("https://other.example");
   });
 
   it("refuses what would make a broken or unsafe link", () => {
-    expect(parseArgs([], {}).error).toMatch(/--user/);
-    expect(parseArgs(["--user", "nope", "--email", "a@example.com"], {}).error).toMatch(/--user/);
-    expect(parseArgs(["--user", USER, "--email", "not-an-email"], {}).error).toMatch(/--email/);
-    expect(parseArgs(["--user", USER, "--email", "a@example.com", "--url", "http://viewer.example"], {}).error).toMatch(/https/);
-    expect(parseArgs(["--user", USER, "--email", "a@example.com", "--hours", "0"], {}).error).toMatch(/--hours/);
-    expect(parseArgs(["--user", USER, "--email"], {}).error).toMatch(/needs a value/);
+    expect(parseArgs([], {}).error).toMatch(/--email/);
+    expect(parseArgs(["--user", USER, "--email", "a@example.com"], {}).error).toMatch(/unknown argument: --user/);
+    expect(parseArgs(["--email", "not-an-email"], {}).error).toMatch(/--email/);
+    expect(parseArgs(["--email", "a@example.com", "--url", "http://viewer.example"], {}).error).toMatch(/https/);
+    expect(parseArgs(["--email", "a@example.com", "--hours", "0"], {}).error).toMatch(/--hours/);
+    expect(parseArgs(["--email"], {}).error).toMatch(/needs a value/);
     expect(parseArgs(["--bogus"], {}).error).toMatch(/unknown/);
   });
 
@@ -43,8 +43,8 @@ describe("scripts/invite.mjs", () => {
   });
 
   it("emails the link only with a full viewer address to put in it", () => {
-    expect(parseArgs(["--user", USER, "--email", "a@example.com", "--send"], {}).error).toMatch(/--send needs/);
-    expect(parseArgs(["--user", USER, "--email", "a@example.com", "--send"], { WEB_PUBLIC_URL: "https://viewer.example" }).options?.send).toBe(true);
+    expect(parseArgs(["--email", "a@example.com", "--send"], {}).error).toMatch(/--send needs/);
+    expect(parseArgs(["--email", "a@example.com", "--send"], { WEB_PUBLIC_URL: "https://viewer.example" }).options?.send).toBe(true);
     const m = inviteMessage({ link: "https://viewer.example/invite/abc", expires: new Date("2026-10-04T00:00:00Z") });
     expect(m.text).toContain("https://viewer.example/invite/abc");
     expect(m.subject).toBe("You're invited to the PulsHealth viewer");

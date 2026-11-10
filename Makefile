@@ -57,11 +57,10 @@ devices: ## Per-device tokens: ARGS='list [--all]' | 'issue --user <uuid> --name
 	$(COMPOSE) run --rm --no-deps -e PULS_PUBLIC_URL="$$(scripts/bootstrap.sh --print-url 2>/dev/null || true)" ingest devices $(ARGS)
 
 # Accounts mode only (WEB_ACCOUNTS=true): a one-time link that creates the
-# person's viewer account, or resets its password. Runs inside the running web
+# person's new member and viewer account. Runs inside the running web
 # container, so it uses that container's database role and WEB_PUBLIC_URL.
-# The user must exist first — `make issue-device` creates it.
-web-invite: ## Invite someone to the web viewer (accounts mode): ARGS='--user <uuid> --email <address> [--admin] [--send]'
-	@$(if $(strip $(ARGS)),:,echo "usage: make web-invite ARGS='--user <uuid> --email <address> [--admin] [--url https://<viewer host>]'"; exit 2)
+web-invite: ## Invite a new member: ARGS='--email <address> [--admin] [--send]'
+	@$(if $(strip $(ARGS)),:,echo "usage: make web-invite ARGS='--email <address> [--admin] [--url https://<viewer host>]'"; exit 2)
 	$(COMPOSE) exec web node scripts/invite.mjs $(ARGS)
 
 # The account behind the public demo (accounts mode, WEB_DEMO_USER): no

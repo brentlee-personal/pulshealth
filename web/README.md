@@ -244,11 +244,10 @@ rate-limit bucket.
 root, an operator can run:
 
 ```bash
-make issue-device NAME='Ann’s iPhone' ARGS='--user <uuid>'   # the phone's token; creates the user
-make web-invite ARGS='--user <uuid> --email ann@example.com' # a one-time viewer link
+make web-invite ARGS='--email ann@example.com' # a fresh member and one-time viewer link
 ```
 
-The second prints `https://<WEB_PUBLIC_URL>/invite/<token>`, valid once for 48
+This prints `https://<WEB_PUBLIC_URL>/invite/<token>`, valid once for 48
 hours (`--hours`); add `--send` to email it to the person instead (through
 the SES settings below) so the link never appears in your terminal. Opening it asks for a password (at least 10 characters) and
 signs the person into a new account. Existing accounts use
@@ -256,8 +255,11 @@ signs the person into a new account. Existing accounts use
 existing account are rejected. If recovery cannot verify the owner, the
 account stays sealed. `--admin` marks the new
 account as an administrator, which gives it `/admin` (below). Every signed-in
-personal account can connect its own iPhone from the app or the account page;
-`make issue-device` also remains available to the operator.
+personal account connects its own iPhone from the app or the account page.
+`--user` is rejected: an invite cannot claim an existing member's history.
+Migration 041 expires old unused invitation links. Reissue an invitation for
+a fresh member; existing accounts use owner-verified recovery. Unclaimed
+legacy health data stays sealed, with no automatic email or UUID mapping.
 
 **Signing in.** `/login`, `/invite/<token>`, their two POST endpoints,
 `/api/auth/logout`, `/demo` (a 404 unless the demo below is on), build

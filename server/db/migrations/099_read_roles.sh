@@ -837,6 +837,7 @@ if [[ "$(psql -X -q -tA --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
           -c "SELECT to_regprocedure('puls_create_web_views()') IS NOT NULL
                  AND to_regprocedure('auth.purge_user(bytea,uuid)') IS NOT NULL
                  AND to_regprocedure('auth.decline_signups(bytea,uuid[])') IS NOT NULL
+                 AND to_regprocedure('auth.invite_new_member(bytea,text,boolean,integer)') IS NOT NULL
                  AND to_regclass('auth.oauth_grants') IS NOT NULL
                  AND to_regclass('auth.account_deletions') IS NOT NULL
                  AND to_regclass('auth.password_resets') IS NOT NULL")" != t ]]; then
@@ -969,6 +970,7 @@ TO web_app;
 -- web_app gets EXECUTE on exactly these and on no other function of its own
 -- (PostgreSQL's default PUBLIC EXECUTE covers built-ins like time_bucket).
 GRANT EXECUTE ON FUNCTION
+  auth.invite_new_member(bytea, text, boolean, integer),
   auth.approve_signup(bytea, uuid),
   auth.set_account_disabled(bytea, uuid, boolean),
   auth.purge_user(bytea, uuid),
@@ -1156,6 +1158,7 @@ BEGIN
   -- Extensions' own functions are theirs to answer for.
   IF EXISTS (
     WITH expected(signature) AS (VALUES
+      ('auth.invite_new_member(bytea,text,boolean,integer)'),
       ('auth.approve_signup(bytea,uuid)'),
       ('auth.set_account_disabled(bytea,uuid,boolean)'),
       ('auth.purge_user(bytea,uuid)'),
