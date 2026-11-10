@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { accountsOnly, refuseDemo, clearSessionCookie, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
+import { accountsOnly, clearSessionCookie, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
 import { deleteAccountSession, deleteOtherSessions } from "@/lib/accounts/session";
 
 // The account page's session list: sign out one browser (`session` is the
@@ -14,8 +14,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  const demo = refuseDemo(session);
-  if (demo) return demo;
 
   const target = field(await readForm(request), "session");
   try {

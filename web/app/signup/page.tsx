@@ -21,7 +21,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
   if (!signupsOpen()) notFound();
   // Signed in already: nothing to ask for — unless it is the shared demo.
   const session = await currentSession().catch(() => null);
-  if (session && !session.demo) redirect("/");
+  if (session) redirect("/");
   const params = await searchParams;
   const notice = param(params.notice);
 

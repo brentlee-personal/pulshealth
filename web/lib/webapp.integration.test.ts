@@ -404,8 +404,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("web_app role (integration)", () => {
     const { rows } = await web.query<{ id: string }>("SELECT id FROM auth.accounts WHERE user_id = $1", [A]);
     expect(rows).toHaveLength(1);
     await web.query(
-      `INSERT INTO auth.sessions (id, account_id, expires_at)
-       VALUES (sha256('it-session'::bytea), $1, now() + interval '1 day')`,
+      `INSERT INTO auth.sessions (id, account_id, expires_at, purpose)
+       VALUES (sha256('it-session'::bytea), $1, now() + interval '1 day', 'personal')`,
       [rows[0].id],
     );
     await web.query("DELETE FROM auth.accounts WHERE id = $1", [rows[0].id]);

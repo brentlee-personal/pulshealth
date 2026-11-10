@@ -18,7 +18,6 @@ import { scoped, type QueryFn } from "../db";
 import { typeByIdentifier } from "../catalog";
 import { reportingTimeZone } from "../reportingTimeZone";
 import { defaultAgg, RANGES, resolvePresetWindow } from "../metrics";
-import { demoLatest, demoSeries, demoTodaySum } from "../demo";
 import type { Latest, RangeKey, Series, SeriesPoint } from "../types";
 import { DAY_MS, metricDailyUsable } from "./metricDaily";
 import { liveRead } from "./source";
@@ -75,7 +74,7 @@ export async function getSeries(userId: string, identifier: string, range: Range
   const type = typeByIdentifier(identifier);
   const agg = defaultAgg(identifier);
   const empty: Series = { identifier, unit: type?.unit ?? null, agg, bucketMs: RANGES[range].bucketMs, points: [] };
-  return liveRead("getSeries", () => demoSeries(identifier, range), async () => {
+  return liveRead("getSeries", async () => {
     // `from` is an instant (now − span). Every query below aligns it down to
     // the start of the bucket that contains it, in the viewer's zone, via
     // time_bucket($1, $from, $tz): otherwise the first day/week bucket held a
@@ -259,7 +258,7 @@ const LATEST_RECENT_DAYS = 14;
 export async function getLatestMany(userId: string, identifiers: string[]): Promise<Map<string, Latest>> {
   const out = new Map<string, Latest>();
   if (!identifiers.length) return out;
-  return liveRead("getLatestMany", () => new Map(identifiers.flatMap((id) => { const latest = demoLatest(id); return latest ? [[id, latest] as const] : []; })), async () => {
+  return liveRead("getLatestMany", async () => {
     // One probe per type: the type reaches the scan as an outer reference of
     // the LATERAL, which a security-barrier view accepts (a DISTINCT ON over
     // a join read every sample there is).
@@ -302,7 +301,7 @@ export async function getLatestMany(userId: string, identifiers: string[]): Prom
 export async function getTodayTotals(userId: string, identifiers: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!identifiers.length) return out;
-  return liveRead("getTodayTotals", () => new Map(identifiers.map((id) => [id, demoTodaySum(id)])), async () => {
+  return liveRead("getTodayTotals", async () => {
     for (const id of identifiers) out.set(id, 0);
     const timeZone = await reportingTimeZone(userId);
 
@@ -341,7 +340,7 @@ const demoSparkline = (identifier: string, days: number) =>
 export async function getDailySparklines(userId: string, identifiers: string[], days = 21): Promise<Map<string, number[]>> {
   const out = new Map<string, number[]>();
   if (!identifiers.length) return out;
-  return liveRead("getDailySparklines", () => new Map(identifiers.map((id) => [id, demoSparkline(id, days)])), async () => {
+  return liveRead("getDailySparklines", async () => {
     const byId = new Map<string, number[]>();
     // Decided before the transaction (it reads through query()).
     const dailyUsable = await metricDailyUsable(userId);

@@ -1,23 +1,10 @@
-// Where the viewer's data comes from, and what a read does when it cannot
-// come from the database.
-//
-// Demo fallback is a DEV-ONLY convenience: outside production
-// (`NODE_ENV !== "production"`) an unconfigured or unreachable database is
-// the "demo" source, and synthetic data keeps the UI populated. In production
-// (the `web` container image sets NODE_ENV=production) demo data is NEVER
-// served. Every read goes through `liveRead`, which turns anything but a live
-// answer into either demo data (the "demo" source only) or a thrown
-// DataUnavailableError, which the page's error boundary (app/error.tsx)
-// shows as "Database unavailable" — never an empty chart that would read as
-// "no data". Live mode never fabricates either: an empty result stays empty.
+// Personal reads never substitute generated health values.
 
 import { healthQuery } from "../db";
 import { viewerMode } from "../mode";
 import type { DataSourceInfo } from "../types";
 import { DataUnavailableError } from "./unavailable";
 
-// Demo data is a dev-only convenience; production never fabricates.
-export const ALLOW_DEMO = process.env.NODE_ENV !== "production";
 
 // ── data source detection (short TTL cache) ──────────────────────────────
 let srcCache: { info: DataSourceInfo; at: number } | null = null;
@@ -28,9 +15,7 @@ const ERROR_TTL = 1000;
 
 export async function getDataSource(): Promise<DataSourceInfo> {
   if (!process.env.DATABASE_URL) {
-    return ALLOW_DEMO
-      ? { source: "demo", detail: "No DATABASE_URL set — showing demo data" }
-      : { source: "error", detail: "No DATABASE_URL configured" };
+    return { source: "error", detail: "Personal storage is not configured" };
   }
   if (srcCache && Date.now() - srcCache.at < (srcCache.info.source === "live" ? SRC_TTL : ERROR_TTL)) return srcCache.info;
   if (srcInFlight) return srcInFlight;
@@ -47,33 +32,19 @@ export async function getDataSource(): Promise<DataSourceInfo> {
 async function checkDataSource(): Promise<DataSourceInfo> {
   let info: DataSourceInfo;
   try {
-    if (viewerMode() === "accounts") {
-      // Accounts mode promises that the database, not this code, keeps people
-      // to their own records — which holds only as web_app. Connected as any
-      // role that can read the tables directly (grafana, the superuser), serve
-      // nothing: every read throws DataUnavailableError while the source is
-      // not live, and /api/healthz reports it.
-      const rows = await healthQuery<{ direct: boolean }>(
-        `SELECT has_table_privilege('public.quantity_samples', 'SELECT')
-             OR has_table_privilege('public.users', 'SELECT') AS direct`,
-      );
-      if (rows[0]?.direct) {
-        warnOnce(
-          "accounts-role",
-          "[queries] WEB_ACCOUNTS is on, but this database role can read every user's records directly. " +
-            "Connect as web_app (WEB_DATABASE_URL in server/.env); serving no data until then.",
-        );
-        return { source: "error", detail: "Accounts mode needs the web_app database role" };
-      }
-    } else {
-      await healthQuery("SELECT 1");
+    viewerMode();
+    const rows = await healthQuery<{ role: string; direct: boolean }>(
+      `SELECT current_user AS role, has_any_column_privilege('public.quantity_samples', 'SELECT')
+           OR has_any_column_privilege('public.users', 'SELECT') AS direct`,
+    );
+    if (rows[0]?.role !== "web_app" || rows[0].direct) {
+      warnOnce("accounts-role", "[queries] Personal reads require the restricted web_app role.");
+      return { source: "error", detail: "Personal storage is unavailable" };
     }
     info = { source: "live", detail: "Connected to TimescaleDB" };
   } catch (e) {
-    info = ALLOW_DEMO
-      ? { source: "demo", detail: "Database unreachable — showing demo data" }
-      : { source: "error", detail: "Database unreachable" };
-    if (!ALLOW_DEMO) console.error("[queries] database unreachable:", e);
+    info = { source: "error", detail: "Database unreachable" };
+    console.error("[queries] database unreachable:", e);
   }
   return info;
 }
@@ -91,18 +62,9 @@ export function readFailed(what: string, e: unknown): void {
   srcCache = null;
 }
 
-/**
- * One read of the viewer's data. On the "demo" source (dev only) the answer
- * is `demo()`; on the "error" source, a DataUnavailableError without touching
- * the database; live, `read()` — and if that fails, the failure is logged,
- * the source is re-checked on the next call (`readFailed`), and the page gets
- * a DataUnavailableError rather than an empty value it would chart as "no
- * data". A DataUnavailableError from a nested read (All Time asking for the
- * stats) passes through as it is.
- */
-export async function liveRead<T>(what: string, demo: () => T, read: () => Promise<T>): Promise<T> {
+/** A failed or unconfigured read stays unavailable, never synthetic or empty. */
+export async function liveRead<T>(what: string, read: () => Promise<T>): Promise<T> {
   const info = await getDataSource();
-  if (info.source === "demo") return demo();
   if (info.source !== "live") throw new DataUnavailableError(info.detail);
   try {
     return await read();

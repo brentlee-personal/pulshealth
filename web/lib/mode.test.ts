@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
+import { isTrue, parseFlag, signupsOpen, trustProxyHeaders, viewerMode } from "./mode";
 
-import { demoUserId, isTrue, parseDemoUser, parseFlag, signupsOpen, trustProxyHeaders, viewerMode } from "./mode";
-
-describe("viewerMode", () => {
-  it("is accounts when WEB_ACCOUNTS is on, whatever else is set", () => {
+describe("personal viewer mode", () => {
+  it("requires personal accounts without a mode flag", () => {
+    expect(viewerMode({})).toBe("accounts");
     expect(viewerMode({ WEB_ACCOUNTS: "true" })).toBe("accounts");
-    expect(viewerMode({ WEB_ACCOUNTS: "1", WEB_AUTH_PASSWORD: "x" })).toBe("accounts");
+    expect(() => viewerMode({ WEB_ACCOUNTS: "false" })).toThrow(/personal accounts are required/);
   });
 
-  it("falls back to basic with a password, open without", () => {
-    expect(viewerMode({ WEB_ACCOUNTS: "false", WEB_AUTH_PASSWORD: "pw" })).toBe("basic");
-    expect(viewerMode({ WEB_ACCOUNTS: "" })).toBe("open");
-    expect(viewerMode({})).toBe("open");
+  it("refuses each shared identity setting without echoing its value", () => {
+    for (const name of ["WEB_AUTH_PASSWORD", "WEB_DEMO_USER", "PULS_USER_ID", "PULS_MULTI_USER", "PULS_API_TOKEN"]) {
+      expect(() => viewerMode({ [name]: "synthetic-private-setting" })).toThrow(`${name} is retired`);
+      try {
+        viewerMode({ [name]: "synthetic-private-setting" });
+      } catch (error) {
+        expect(String(error)).not.toContain("synthetic-private-setting");
+      }
+    }
   });
 
   it("reads flags the way the Go services do", () => {
@@ -42,31 +47,10 @@ describe("viewerMode", () => {
     expect(trustProxyHeaders({ TRUST_PROXY_HEADERS: "ture" })).toBe(false);
   });
 
-  it("opens sign-up requests only in accounts mode, and only when asked", () => {
-    expect(signupsOpen({ WEB_ACCOUNTS: "true", WEB_SIGNUPS: "true" })).toBe(true);
-    expect(signupsOpen({ WEB_ACCOUNTS: "true" })).toBe(false);
-    expect(signupsOpen({ WEB_SIGNUPS: "true" })).toBe(false);
-    expect(signupsOpen({ WEB_AUTH_PASSWORD: "pw", WEB_SIGNUPS: "true" })).toBe(false);
-  });
-
-  it("reads WEB_DEMO_USER as a UUID, only in accounts mode", () => {
-    const id = "0D3A0000-0000-4000-8000-0000000000AB";
-    expect(parseDemoUser({ WEB_DEMO_USER: id })).toBe(id.toLowerCase());
-    expect(parseDemoUser({ WEB_DEMO_USER: ` ${id} ` })).toBe(id.toLowerCase());
-    for (const empty of [undefined, "", "  "]) expect(parseDemoUser({ WEB_DEMO_USER: empty }), String(empty)).toBeNull();
-    for (const bad of ["demo", "0d3a0000-0000-4000-8000", `${id}x`, "'; DROP TABLE users; --"]) {
-      expect(() => parseDemoUser({ WEB_DEMO_USER: bad }), bad).toThrow(/^WEB_DEMO_USER must be the demo user's UUID/);
-    }
-    // Never the household's own user: the seeded one, or PULS_USER_ID.
-    expect(() => parseDemoUser({ WEB_DEMO_USER: "5EA4D000-0000-4000-8000-000000000001" })).toThrow(/household's default user/);
-    expect(() => parseDemoUser({ WEB_DEMO_USER: id, PULS_USER_ID: id.toLowerCase() })).toThrow(/household's default user/);
-    expect(demoUserId({ WEB_ACCOUNTS: "true", WEB_DEMO_USER: id })).toBe(id.toLowerCase());
-    expect(demoUserId({ WEB_ACCOUNTS: "true" })).toBeNull();
-    // Ignored outside accounts mode.
-    expect(demoUserId({ WEB_DEMO_USER: id })).toBeNull();
-    expect(demoUserId({ WEB_AUTH_PASSWORD: "pw", WEB_DEMO_USER: id })).toBeNull();
-    // At request time (startup already refused it) a refused value is no demo.
-    expect(demoUserId({ WEB_ACCOUNTS: "true", WEB_DEMO_USER: "demo" })).toBeNull();
-    expect(demoUserId({ WEB_ACCOUNTS: "true", WEB_DEMO_USER: id, PULS_USER_ID: id })).toBeNull();
+  it("opens account requests only when explicitly enabled", () => {
+    expect(signupsOpen({})).toBe(false);
+    expect(signupsOpen({ WEB_SIGNUPS: "true" })).toBe(true);
+    expect(signupsOpen({ WEB_SIGNUPS: "false" })).toBe(false);
+    expect(() => signupsOpen({ WEB_AUTH_PASSWORD: "shared" })).toThrow(/retired/);
   });
 });

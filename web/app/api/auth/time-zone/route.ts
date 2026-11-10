@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { accountsOnly, refuseDemo, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
+import { accountsOnly, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
 import { query } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +9,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  const demo = refuseDemo(session);
-  if (demo) return demo;
   const form = await readForm(request);
   const zone = field(form, "time_zone").trim();
   try {

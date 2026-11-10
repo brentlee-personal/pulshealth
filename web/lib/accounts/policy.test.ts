@@ -23,7 +23,7 @@ describe("classifyPath", () => {
     expect(classifyPath("/api/auth/logout")).toBe("public");
     expect(classifyPath("/signup")).toBe("public");
     expect(classifyPath("/api/auth/signup")).toBe("public");
-    expect(classifyPath("/demo")).toBe("public");
+    expect(classifyPath("/demo")).toBe("protected");
     for (const path of [
       "/",
       "/workouts",

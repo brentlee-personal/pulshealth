@@ -229,8 +229,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     // session of the person's own, still inside its sliding 30 days.
     const old = createHash("sha256").update(`old-${tag}`).digest();
     await admin.query(
-      `INSERT INTO auth.sessions (id, account_id, created_at, expires_at)
-       SELECT $1, id, now() - interval '91 days', now() + interval '1 day' FROM auth.accounts WHERE user_id = $2`,
+      `INSERT INTO auth.sessions (id, account_id, created_at, expires_at, purpose)
+       SELECT $1, id, now() - interval '91 days', now() + interval '1 day', 'personal' FROM auth.accounts WHERE user_id = $2`,
       [old, personUser],
     );
     try {
@@ -267,12 +267,12 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     try {
       const forged = createHash("sha256").update(`forged-${tag}`).digest();
       const adminAccount = (await admin.query("SELECT id::text FROM auth.accounts WHERE email = $1", [ADMIN_EMAIL])).rows[0].id;
-      await web.query("INSERT INTO auth.sessions (id, account_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')", [forged, adminAccount]);
+      await web.query("INSERT INTO auth.sessions (id, account_id, expires_at, purpose) VALUES ($1, $2, now() + interval '1 hour', 'personal')", [forged, adminAccount]);
       const householdAccount = (await web.query<{ id: string }>(
         "INSERT INTO auth.accounts (user_id, email, password_hash) VALUES ($1, $2, 'x') RETURNING id::text", [household, `household-${tag}@example.com`],
       )).rows[0].id;
       const forgedHousehold = createHash("sha256").update(`forged-household-${tag}`).digest();
-      await web.query("INSERT INTO auth.sessions (id, account_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')", [forgedHousehold, householdAccount]);
+      await web.query("INSERT INTO auth.sessions (id, account_id, expires_at, purpose) VALUES ($1, $2, now() + interval '1 hour', 'personal')", [forgedHousehold, householdAccount]);
 
       // An administrator's session (forged or real) cannot touch a household user...
       for (const session of [forged, adminSession]) {

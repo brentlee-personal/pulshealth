@@ -7,12 +7,11 @@ import "./globals.css";
 import "@/components/navigation.css";
 import { AppNavigation } from "@/components/AppNavigation";
 import { UnitsProvider } from "@/components/UnitsProvider";
-import { getDataSource, getUsers } from "@/lib/queries";
+import { getDataSource } from "@/lib/queries";
 import { TimeZoneProvider } from "@/components/TimeZoneProvider";
 import { reportingTimeZone } from "@/lib/reportingTimeZone";
 import { configuredTimeZone } from "@/lib/config";
-import { signupsOpen, viewerMode } from "@/lib/mode";
-import { currentSession, viewerUser } from "@/lib/viewer";
+import { currentSession } from "@/lib/viewer";
 import { isBarePage, PATH_HEADER } from "@/lib/shell";
 
 export const metadata: Metadata = {
@@ -53,28 +52,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   );
 }
 
-// Authentication and connection pages always stand alone, even with an active
-// demo session. Signed-out accounts-mode visitors also get the focused frame;
-// dashboard links would only bounce them back to sign in.
 async function shell(children: React.ReactNode, pathname: string | null) {
   if (isBarePage(pathname)) return <main className="auth-shell">{children}</main>;
-  if (viewerMode() === "accounts") {
-    // No switcher and no list of users: the session's user is the only one.
-    const session = await currentSession().catch(() => null);
-    if (!session) return <main className="auth-shell">{children}</main>;
-    const source = await getDataSource();
-    return (
-      <AppNavigation
-          source={source}
-          users={[]}
-          currentUserId={session.userId}
-          account={{ email: session.email, isAdmin: session.isAdmin, demo: session.demo }}
-          signupsOpen={signupsOpen()}
-      >{children}</AppNavigation>
-    );
-  }
-  const [source, users, currentUserId] = await Promise.all([getDataSource(), getUsers(), viewerUser()]);
-  return (
-    <AppNavigation source={source} users={users} currentUserId={currentUserId}>{children}</AppNavigation>
-  );
+  const session = await currentSession().catch(() => null);
+  if (!session) return <main className="auth-shell">{children}</main>;
+  const source = await getDataSource();
+  return <AppNavigation source={source} account={{ email: session.email, isAdmin: session.isAdmin }}>{children}</AppNavigation>;
 }

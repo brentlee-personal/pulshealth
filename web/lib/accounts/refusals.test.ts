@@ -11,9 +11,6 @@ import { oauthKeyFixture } from "../oauth/keyFixture";
 //     error=forbidden, and in either case the database is never reached;
 //   - the server actions (/admin's Approve, the account page's Connect this
 //     iPhone), which run outside the route table but behind the same proxy;
-//   - a demo session (WEB_DEMO_USER, view-only): every session route, both
-//     server actions and the OAuth consent decision refuse it — a 303 to
-//     /account?error=demo, or the consent's 403 — before the database.
 //
 // ROUTES below is checked against the files on disk and against each
 // module's exported methods, so a new route.ts (or a new method on an old
@@ -72,7 +69,6 @@ interface Session {
   email: string;
   isAdmin: boolean;
   selfService: boolean;
-  demo: boolean;
   refreshed: boolean;
 }
 
@@ -128,7 +124,6 @@ const ROUTES: Record<string, { methods: Method[]; guard: Guard }> = {
   "/api/auth/logout": { methods: ["POST"], guard: { kind: "public", why: "acts only on the cookie it is sent" } },
   "/api/auth/signup": { methods: ["POST"], guard: { kind: "public", why: "records a request; creates nothing until approved" } },
   "/api/healthz": { methods: ["GET"], guard: { kind: "health" } },
-  "/api/user": { methods: ["POST"], guard: { kind: "absent" } },
 };
 
 const API_DIR = fileURLToPath(new URL("../../app/api/", import.meta.url));
@@ -156,11 +151,8 @@ const SESSION: Session = {
   email: "person@example.com",
   isAdmin: false,
   selfService: true,
-  demo: false,
   refreshed: false,
 };
-// The shared demo account's session, as findSession returns it.
-const DEMO: Session = { ...SESSION, email: "demo@demo.invalid", isAdmin: false, selfService: false, demo: true };
 const OTHER = "20000000-0000-4000-8000-000000000002";
 
 // A browser behind the TLS proxy (TRUST_PROXY_HEADERS=true), same origin.
@@ -325,23 +317,8 @@ describe("the handlers themselves, should a request get past the proxy", () => {
     expectNothingReached();
   });
 
-  // Every route that needs a session changes something about an account,
-  // so every one refuses the view-only demo; a new one fails here until it
-  // does (lib/accounts/http.ts refuseDemo).
-  it.each(guarded)("$method $path refuses a demo session: 303 to /account?error=demo", async ({ path, method }) => {
-    // Even a demo account whose row says administrator or self-service.
-    for (const session of [DEMO, { ...DEMO, isAdmin: true, selfService: true }]) {
-      findSession.mockResolvedValue(session);
-      const res = await handle(path, method, request(path, method, SAME_ORIGIN));
-      expect(res.status, JSON.stringify(session)).toBe(303);
-      expect(res.headers.get("location")).toBe(path === "/api/auth/connect-iphone" ? "/connect/iphone?error=demo" : "/account?error=demo");
-      expect(res.cookies.get("__Host-puls-session")).toBeUndefined();
-    }
-    expectNothingReached();
-  });
-
-  it("POST /api/auth/logout still signs a demo session out (it ends only this browser's session)", async () => {
-    findSession.mockResolvedValue(DEMO);
+  it("POST /api/auth/logout ends only this browser session", async () => {
+    findSession.mockResolvedValue(SESSION);
     db.query.mockImplementationOnce(async () => [] as never);
     const res = await handle("/api/auth/logout", "POST", request("/api/auth/logout", "POST", SAME_ORIGIN));
     expect(res.headers.get("location")).toBe("/login?notice=signed-out");
@@ -359,11 +336,10 @@ describe("the handlers themselves, should a request get past the proxy", () => {
   });
 
   it.each(rows.filter((r) => r.guard.kind === "session" || r.guard.kind === "public"))(
-    "$method $path is a 404 outside accounts mode",
+    "$method $path rejects an attempt to disable personal accounts",
     async ({ path, method }) => {
-      delete process.env.WEB_ACCOUNTS;
-      const res = await handle(path, method, request(path, method, SAME_ORIGIN));
-      expect(res.status).toBe(404);
+      process.env.WEB_ACCOUNTS = "false";
+      await expect(handle(path, method, request(path, method, SAME_ORIGIN))).rejects.toThrow(/WEB_ACCOUNTS/);
       expect(findSession).not.toHaveBeenCalled();
       expectNothingReached();
     },
@@ -384,10 +360,9 @@ describe("the server actions", () => {
     // A database that cannot be asked is no session either.
     findSession.mockRejectedValue(new Error("connection refused"));
     expect(await approveRequest(null, form())).toMatchObject({ ok: false });
-    // And outside accounts mode there is no administrator at all.
-    delete process.env.WEB_ACCOUNTS;
+    process.env.WEB_ACCOUNTS = "false";
     findSession.mockResolvedValue({ ...SESSION, isAdmin: true });
-    expect(await approveRequest(null, form())).toMatchObject({ ok: false });
+    await expect(approveRequest(null, form())).rejects.toThrow(/WEB_ACCOUNTS/);
     expectNothingReached();
   });
 
@@ -399,50 +374,27 @@ describe("the server actions", () => {
     cookieValue.current = TOKEN;
     findSession.mockRejectedValue(new Error("connection refused"));
     expect(await connectIphone(null, form())).toMatchObject({ ok: false });
-    delete process.env.WEB_ACCOUNTS;
+    process.env.WEB_ACCOUNTS = "false";
     findSession.mockResolvedValue(SESSION);
-    expect(await connectIphone(null, form())).toMatchObject({ ok: false });
+    await expect(connectIphone(null, form())).rejects.toThrow(/WEB_ACCOUNTS/);
     expectNothingReached();
   });
 
-  it("both refuse a demo session, whatever its rows say", async () => {
-    const { approveRequest } = await import("@/app/admin/actions");
-    const { connectIphone } = await import("@/app/account/actions");
-    for (const session of [DEMO, { ...DEMO, isAdmin: true, selfService: true }]) {
-      findSession.mockResolvedValue(session);
-      expect(await approveRequest(null, form())).toEqual({ ok: false, error: "Only an administrator can approve requests." });
-      expect(await connectIphone(null, form())).toEqual({ ok: false, error: expect.stringMatching(/^Not available on the demo account/) });
-    }
-    expectNothingReached();
-  });
+
 });
 
 describe("the OAuth consent decision", () => {
-  it("never connects an assistant to the demo account", async () => {
+  it("requires a live personal session before accepting consent", async () => {
     process.env.WEB_PUBLIC_URL = "https://viewer.example";
     process.env.PULS_MCP_URL = "https://mcp.example/mcp";
-    delete process.env.PULS_MCP_OAUTH_SECRET;
-  Object.assign(process.env, oauthKeys.env);
+    Object.assign(process.env, oauthKeys.env);
     const { POST } = await import("@/app/oauth/authorize/decision/route");
-    const body = new FormData();
-    for (const [k, v] of [
-      ["decision", "allow"],
-      ["client_id", "pc_AAAAAAAAAAAAAAAAAAAAAAAA"],
-      ["redirect_uri", "https://claude.ai/api/mcp/auth_callback"],
-      ["response_type", "code"],
-      ["code_challenge", "p_j-Nj_Xa-C0MOoCl6lv9UzGgSvHUvKaouTlEnyXOiE"],
-      ["code_challenge_method", "S256"],
-      ["scope", "health:read"],
-    ]) {
-      body.append(k, v);
-    }
-    findSession.mockResolvedValue(DEMO);
-    const res = await POST(
-      new NextRequest(new URL("/oauth/authorize/decision", "http://web:3000"), { method: "POST", headers: new Headers(SAME_ORIGIN), body }),
-    );
-    expect(res.status).toBe(403);
-    expect(res.headers.get("location")).toBeNull();
-    expect(await res.text()).toMatch(/AI assistants cannot connect to the demo account/);
+    findSession.mockResolvedValue(null);
+    const response = await POST(new NextRequest("http://web:3000/oauth/authorize/decision", {
+      method: "POST", headers: new Headers(SAME_ORIGIN), body: new FormData(),
+    }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("location")).toBeNull();
     expectNothingReached();
   });
 });

@@ -1,44 +1,15 @@
-// The people in the database: Basic mode's switcher list, one user's own
-// row, and the profile behind the heart-rate zones.
+// The authenticated member's stored profile.
 
-import { query, scoped } from "../db";
+import { scoped } from "../db";
 import { reportingTimeZone } from "../reportingTimeZone";
 import { configuredTimeZone } from "../config";
-import { demoProfile, demoUsers } from "../demo";
 import type { Profile, User } from "../types";
-import { getDataSource, liveRead, readFailed } from "./source";
-
-// ── the users the database holds (for the switcher) ──────────────────────
-// Oldest first, so the seeded default user — created by migration 000 before
-// any phone syncs — leads the list. Name and email are null until the
-// phone's first {"profile":…} line lands.
-//
-// Not health data and never thrown: the root layout renders the switcher,
-// and a layout sits outside the error boundary of the page it wraps, so a
-// throw here would take the whole shell down instead of one page. A failure
-// reads as an empty list (and re-checks the source, so the sidebar shows
-// "Database unavailable" from the next load).
-export async function getUsers(): Promise<User[]> {
-  const { source } = await getDataSource();
-  if (source === "demo") return demoUsers();
-  if (source !== "live") return [];
-  try {
-    const rows = await query<{ id: string; name: string | null; email: string | null }>(
-      `SELECT id::text AS id, name, email
-         FROM users
-        ORDER BY created_at, id`,
-    );
-    return rows.map((r) => ({ id: r.id, name: r.name, email: r.email }));
-  } catch (e) {
-    readFailed("getUsers", e);
-    return [];
-  }
-}
+import { liveRead } from "./source";
 
 // ── one user's own row (name/email from the phone's profile) ─────────────
 export async function getUser(userId: string): Promise<User> {
   const fallback: User = { id: userId, name: null, email: null };
-  return liveRead("getUser", () => demoUsers().find((u) => u.id === userId) ?? fallback, async () => {
+  return liveRead("getUser", async () => {
     const rows = await scoped(userId, (q) => q<{ id: string; name: string | null; email: string | null }>(
       "SELECT id::text AS id, name, email FROM users WHERE id = $1::uuid",
       [userId],
@@ -52,7 +23,7 @@ export const DEFAULT_MAX_HR = 190;
 
 export async function getProfile(userId: string): Promise<Profile> {
   const fallback: Profile = { dob: null, biologicalSex: null, age: null, maxHr: DEFAULT_MAX_HR, restingHr: null };
-  return liveRead("getProfile", demoProfile, async () => {
+  return liveRead("getProfile", async () => {
     const timeZone = await reportingTimeZone(userId);
     const rows = await scoped(userId, (q) => q<{ dob: string | null; biological_sex: string | null; resting_hr: number | null }>(
       `SELECT (extract(epoch from (u.dob::timestamp AT TIME ZONE $2::text)) * 1000)::bigint AS dob,

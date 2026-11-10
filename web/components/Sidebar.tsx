@@ -5,35 +5,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GROUPS, GROUP_LABELS } from "@/lib/catalog";
 import { GROUP_COLOR } from "@/lib/colors";
-import type { DataSourceInfo, User } from "@/lib/types";
+import type { DataSourceInfo } from "@/lib/types";
 import { GridIcon, GroupIcon, HomeIcon, SettingsIcon, SignOutIcon, UserIcon, WorkoutIcon } from "./Icons";
-import { UserSwitcher } from "./UserSwitcher";
 
 export function Sidebar({
   source,
-  users,
-  currentUserId,
-  account = null,
+  account,
   menuOpen,
   sidebarRef,
   closeMenu,
 }: {
   source: DataSourceInfo;
-  users: User[];
-  currentUserId: string;
-  /** The signed-in account, in accounts mode; null otherwise. `demo`: the shared, view-only demo account. */
-  account?: { email: string; isAdmin: boolean; demo?: boolean } | null;
-  /** Whether /signup takes requests (lib/mode.ts signupsOpen), for the demo banner's Create account link. */
-  signupsOpen?: boolean;
+  account: { email: string; isAdmin: boolean };
   menuOpen: boolean;
   sidebarRef: RefObject<HTMLElement | null>;
   closeMenu: () => void;
 }) {
   const path = usePathname();
-  // A choice is only worth offering when there is one — or when the current
-  // user (from a stale cookie or a bad ?user= link) is not in the list at
-  // all, so the way back to a real user is one click away.
-  const showSwitcher = users.length >= 2 || (users.length >= 1 && !users.some((u) => u.id === currentUserId));
 
   const primary = [
     { href: "/", label: "Today", icon: <HomeIcon className="nav-icon" /> },
@@ -90,17 +78,16 @@ export function Sidebar({
         <div className="sidebar-spacer" />
 
         <div className="nav-section" style={{ marginTop: 0 }}>
-          {showSwitcher && <UserSwitcher users={users} currentUserId={currentUserId} />}
           {account && (
             <Link
               href="/account"
               aria-current={path === "/account" ? "page" : undefined}
               className={`nav-link${path === "/account" ? " active" : ""}`}
-              title={account.demo ? "The shared demo account" : `Signed in as ${account.email}`}
+              title={`Signed in as ${account.email}`}
             >
               <UserIcon className="nav-icon" />
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {account.demo ? "Demo account" : account.email}
+                {account.email}
               </span>
             </Link>
           )}
@@ -126,10 +113,10 @@ export function Sidebar({
           <div className="chip" style={{ marginTop: 10, width: "100%", justifyContent: "flex-start" }} title={source.detail}>
             <span
               className="dot"
-              style={{ background: account?.demo ? "#ff9f0a" : source.source === "live" ? "#30d158" : source.source === "demo" ? "#ff9f0a" : "#ff453a" }}
+              style={{ background: source.source === "live" ? "#30d158" : "#ff453a" }}
             />
             <span style={{ fontSize: 12 }}>
-              {account?.demo ? "Demo data" : source.source === "live" ? "Live data" : source.source === "demo" ? "Demo data" : "Database unavailable"}
+              {source.source === "live" ? "Live data" : "Database unavailable"}
             </span>
           </div>
         </div>

@@ -107,6 +107,24 @@ describe.skipIf(!databases.available || !apiUrl)("personal API credential author
     }
   });
 
+  it("stops an issued credential when its session no longer has personal sign-in proof", async () => {
+    const cookie = await createSession(accountA, { userAgent: null, ip: null });
+    const sessionId = tokenHash(cookie);
+    if (!sessionId) throw new Error("Synthetic session token is invalid");
+    try {
+      const issued = await createAPICredential(signer, { kind: "session", sessionId, permissions: narrow });
+      if (!issued) throw new Error("Synthetic personal credential was not issued");
+      expect(await findSession(cookie)).toMatchObject({ userId: members[0] });
+      expect(await resolve(issued.token)).toHaveLength(1);
+      await admin.query("UPDATE auth.sessions SET purpose='legacy',expires_at=now()+interval '1 day' WHERE id=$1", [sessionId]);
+      expect(await findSession(cookie, true)).toBeNull();
+      expect(await resolve(issued.token)).toHaveLength(0);
+      expect(await createAPICredential(signer, { kind: "session", sessionId, permissions: narrow })).toBeNull();
+    } finally {
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1", [sessionId]);
+    }
+  });
+
   it("issues a separate opaque bearer with a public-key-verifiable API assertion", async () => {
     const parent = await grant(false);
     expect(parent.resource).toBe(resource);

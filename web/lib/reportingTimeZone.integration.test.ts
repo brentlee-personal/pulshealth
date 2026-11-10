@@ -15,7 +15,7 @@ describe.skipIf(!webUrl || !adminUrl)("reporting time zone ownership (integratio
     await admin.connect(); await web.connect();
     await admin.query("INSERT INTO users (id, time_zone) VALUES ($1, 'Pacific/Auckland'), ($2, 'Asia/Tokyo')", [a, b]);
     const account = (await admin.query("INSERT INTO auth.accounts (user_id,email,password_hash) VALUES ($1,$2,'unused') RETURNING id", [a, `${a}@example.com`])).rows[0].id;
-    await admin.query("INSERT INTO auth.sessions (id,account_id,expires_at) VALUES ($1,$2,now()+interval '1 hour')", [session, account]);
+    await admin.query("INSERT INTO auth.sessions (id,account_id,expires_at,purpose) VALUES ($1,$2,now()+interval '1 hour','personal')", [session, account]);
   });
   afterAll(async () => {
     if (admin) {

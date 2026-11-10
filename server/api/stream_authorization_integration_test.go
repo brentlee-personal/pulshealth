@@ -98,7 +98,7 @@ func TestIntegrationAPIPoolAndStreamRevocation(t *testing.T) {
 		if _, err := rand.Read(secret); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := admin.Exec(ctx, "INSERT INTO auth.sessions(id,account_id,expires_at) VALUES($1,$2,now()+interval '1 hour')", session, account); err != nil {
+		if _, err := admin.Exec(ctx, "INSERT INTO auth.sessions(id,account_id,expires_at,purpose) VALUES($1,$2,now()+interval '1 hour','personal')", session, account); err != nil {
 			t.Fatal(err)
 		}
 		now := time.Now().Unix()

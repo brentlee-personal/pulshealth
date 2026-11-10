@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { accountsOnly, refuseDemo, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
+import { accountsOnly, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
 import { DECLINE_MAX, declineSignups, disableRefusal, purgeUser, setAccountDisabled } from "@/lib/accounts/signups";
 import { isUuid } from "@/lib/uuid";
 
@@ -20,8 +20,6 @@ export async function POST(request: NextRequest) {
   // The demo first: its sessions are never an administrator's anyway
   // (lib/accounts/session.ts), and this keeps that true should the row say so.
   if (session) {
-    const demo = refuseDemo(session);
-    if (demo) return demo;
   }
   if (!session?.isAdmin) return seeOther("/admin?error=forbidden");
 

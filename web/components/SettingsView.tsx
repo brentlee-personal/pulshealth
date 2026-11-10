@@ -5,7 +5,6 @@
 // heart-rate zones it implies.
 
 import { useUnits } from "./UnitsProvider";
-import { userLabel } from "./UserSwitcher";
 import { UNIT_OPTIONS, defaultUnits, type UnitCategory, type UnitSystem, type UnitOverrides } from "@/lib/units";
 import { displayUnit } from "@/lib/format";
 import { hrZones, type HrZone } from "@/lib/zones";
@@ -70,7 +69,7 @@ export function SettingsView({ profile, user }: { profile: Profile; user: User }
       <section style={{ marginTop: 24 }}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>Profile</div>
         <div className="panel" style={{ overflow: "hidden" }}>
-          <Row label="User" value={userLabel(user)} first />
+          <Row label="User" value={user.name?.trim() || user.email?.trim() || `User ${user.id.slice(0, 8)}`} first />
           <Row label="User ID" value={user.id} mono />
           <Row label="Age" value={profile.age != null ? `${profile.age}` : "Not synced"} />
           <Row label="Biological sex" value={profile.biologicalSex ? cap(profile.biologicalSex) : "Not synced"} />

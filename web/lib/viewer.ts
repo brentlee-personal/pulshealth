@@ -1,45 +1,7 @@
-// Which user the viewer shows for this request (SRV-11).
-//
-// In accounts mode (WEB_ACCOUNTS=true, lib/mode.ts) the answer is the
-// signed-in session's user and nothing else: the session cookie is looked up
-// in the database on every request (once per request, cached), and the
-// `puls-user` cookie and `?user=` below are ignored. Everything that follows
-// in this comment is Basic and open mode.
-//
-// The database can hold more than one person's records (every table carries a
-// user_id), but the viewer used to render exactly one: PULS_USER_ID. The
-// chosen user now lives in a cookie, set by POST /api/user (the sidebar's
-// switcher) or by `?user=<uuid>` on any page (proxy.ts). It is a preference,
-// not access control — everyone behind the one WEB_AUTH_PASSWORD can pick any
-// user — so the cookie carries nothing that needs signing: a forged value is
-// at worst a UUID the database does not have, which renders empty.
-//
-// `cookies()` needs a request scope, so this module is imported by pages and
-// route handlers only; lib/queries.ts (lib/data/) takes the user id as a
-// plain argument and stays testable without one.
-
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { findSession, SESSION_COOKIE, type Session } from "./accounts/session";
-import { defaultUserId } from "./config";
-import { viewerMode } from "./mode";
-import { isUuid } from "./uuid";
-
-/** Cookie holding the chosen user's id. */
-export const USER_COOKIE = "puls-user";
-
-/** Seconds the choice is remembered for: a year. */
-export const USER_COOKIE_MAX_AGE = 31_536_000;
-
-/**
- * The user a cookie value selects: the value when it is a UUID, otherwise the
- * fallback. Pure, so the tests can hit it without a request.
- */
-export function parseViewerUser(cookieValue: string | undefined, fallback: string): string {
-  if (isUuid(cookieValue)) return cookieValue.toLowerCase();
-  return fallback;
-}
 
 /**
  * Where to send the browser after a choice or a sign-in: `value` when it is a
@@ -66,44 +28,17 @@ export function safeReturnPath(value: string | null | undefined): string {
   }
 }
 
-/** Cookie attributes for the chosen user; `Secure` only where the page is. */
-export function userCookieOptions(secure: boolean) {
-  return {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax" as const,
-    maxAge: USER_COOKIE_MAX_AGE,
-    secure,
-  };
-}
-
 /**
- * The signed-in session for this request, or null — always null outside
- * accounts mode. Read-only (proxy.ts slides the expiry); cached per request.
+ * The personal session, checked against storage once per request.
  */
 export const currentSession = cache(async (): Promise<Session | null> => {
-  if (viewerMode() !== "accounts") return null;
   const jar = await cookies();
   return findSession(jar.get(SESSION_COOKIE)?.value);
 });
 
-/**
- * The user this request shows. Accounts mode: the session's user, or a
- * redirect to sign in. Otherwise: the cookie's choice, else PULS_USER_ID.
- *
- * Cached per request like `currentSession`, so the layout, the page and its
- * generateMetadata share one answer (and, in accounts mode, one session
- * lookup between them). That is a dedupe within one render, not a
- * replacement for proxy.ts's own lookup: both still read the session row
- * from the database on every request. Outside a React render (a route
- * handler) `cache` does not memoize, and each call looks it up afresh.
- */
+/** The authenticated member; a URL or chooser cookie cannot replace them. */
 export const viewerUser = cache(async (): Promise<string> => {
-  if (viewerMode() === "accounts") {
-    const session = await currentSession();
-    if (!session) redirect("/login");
-    return session.userId;
-  }
-  const jar = await cookies();
-  return parseViewerUser(jar.get(USER_COOKIE)?.value, defaultUserId());
+  const session = await currentSession();
+  if (!session) redirect("/login");
+  return session.userId;
 });

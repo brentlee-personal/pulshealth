@@ -2,7 +2,6 @@
 
 import { scoped } from "../db";
 import { reportingTimeZone } from "../reportingTimeZone";
-import { demoActivityRings } from "../demo";
 import type { ActivityRingsData } from "../types";
 import { liveRead } from "./source";
 
@@ -16,7 +15,7 @@ export async function getActivityRings(userId: string): Promise<ActivityRingsDat
     moveTimeMin: null, moveTimeGoalMin: null,
     hasData: false,
   };
-  return liveRead("getActivityRings", demoActivityRings, async () => {
+  return liveRead("getActivityRings", async () => {
     const timeZone = await reportingTimeZone(userId);
     const rows = await scoped(userId, (q) => q<{
       date: string;

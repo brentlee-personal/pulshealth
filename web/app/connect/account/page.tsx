@@ -12,11 +12,11 @@ export default async function ConnectAccount({ searchParams }: { searchParams: P
   if (!session) redirect(`/login?next=${encodeURIComponent(`/connect/account?state=${state}&challenge=${challenge}`)}`);
   return <AuthCard title="Sign in to PulsHealth" subtitle={`Signed in as ${session.email}.`}>
     <p>Use your account identity in the app and save profile changes to your account. Signing in does not turn on Health data sync.</p>
-    {!session.demo && <form method="post" action="/api/auth/connect-account">
+    <form method="post" action="/api/auth/connect-account">
       <input type="hidden" name="state" value={state} />
       <input type="hidden" name="challenge" value={challenge} />
       <button className="btn btn-primary btn-block" type="submit">Use this account</button>
-    </form>}
+    </form>
     <form method="post" action="/api/auth/logout" style={{ marginTop: 16 }}>
       <input type="hidden" name="next" value={`/connect/account?state=${state}&challenge=${challenge}`} />
       <button className="btn" type="submit">Sign out to use a different account</button>

@@ -4,7 +4,7 @@
 
 import { recordedDemo, recordedSeries } from "./recordedDemo";
 import { CATALOG, typeByIdentifier } from "./catalog";
-import { DEFAULT_USER_ID } from "./config";
+const SYNTHETIC_USER_ID = "5ea4d000-0000-4000-8000-000000000001";
 import { isCumulative, RANGES } from "./metrics";
 import type {
   ActivityRingsData, Latest, Profile, RangeKey, RoutePoint, Series, SeriesPoint, TypeStat,
@@ -440,7 +440,7 @@ export function demoWorkoutSeries(uuid: string): WorkoutSeries[] {
 
 // The one demo user, under the seeded id so it matches the default viewer user.
 export function demoUsers(): User[] {
-  return [{ id: DEFAULT_USER_ID, name: "Demo", email: null }];
+  return [{ id: SYNTHETIC_USER_ID, name: "Demo", email: null }];
 }
 
 export function demoProfile(): Profile {

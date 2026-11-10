@@ -10,18 +10,13 @@ import { errorMessage, noticeMessage, param } from "@/lib/accounts/messages";
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password";
 import { myDevices } from "@/lib/accounts/signups";
 import { formatFull } from "@/lib/format";
-import { DEMO_SESSION_HOURS, listSessions } from "@/lib/accounts/session";
-import { signupsOpen, viewerMode } from "@/lib/mode";
+import { listSessions } from "@/lib/accounts/session";
+import { viewerMode } from "@/lib/mode";
 import { oauthConfig } from "@/lib/oauth/config";
 import { listConnectedApps } from "@/lib/oauth/store";
 import { currentSession } from "@/lib/viewer";
 
-// The signed-in person's own account (accounts mode only): connect an iPhone
-// (and disconnect one), see and revoke the AI assistants connected over
-// OAuth, change the password, see where the account is signed in and sign
-// those browsers out, and delete the account. The shared demo account
-// (WEB_DEMO_USER) gets none of that — only what it is and the way out; its
-// routes refuse every change anyway (lib/accounts/http.ts refuseDemo).
+// The personal account and its sessions, devices and grants.
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Account — PulsHealth" };
 
@@ -33,7 +28,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
   if (!session) redirect("/login?next=%2Faccount");
   const search = await searchParams;
   const returnToApp = /iPhone|iPad|iPod/.test((await headers()).get("user-agent") ?? "");
-  if (session.demo) return <DemoAccount error={errorMessage(param(search.error))} />;
   const timeZone = await reportingTimeZone(session.userId);
   const [sessions, devices, assistants] = await Promise.all([
     listSessions(session.accountId, session.id),
@@ -212,48 +206,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </p>
         </section>
       )}
-    </>
-  );
-}
-
-// The demo account's page: no email, browsers, devices, assistants, password
-// or deletion — strangers share it, and none of those is theirs to see or
-// change.
-function DemoAccount({ error }: { error: string | null }) {
-  return (
-    <>
-      <PageHeader title="Demo account" subtitle="You are exploring PulsHealth with sample data." />
-      {error && (
-        <div className="form-message error" role="alert" style={{ maxWidth: 560 }}>
-          {error}
-        </div>
-      )}
-      <section className="rise" style={{ marginTop: 8 }}>
-        <div className="panel" style={{ padding: 20, maxWidth: 560 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <span className="dot" style={{ background: "#ff9f0a" }} />
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Demo · sample data</span>
-          </div>
-          <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.55, color: "var(--fg-soft)" }}>
-            This is a shared demo account. Its health records are de-identified sample data. Browse every page
-            as you would your own; nothing here can be changed, and this visit ends after {DEMO_SESSION_HOURS} hours.
-          </p>
-          <p style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.55 }}>
-            To connect your iPhone, sign in to your own account first.
-          </p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <a href="/login?next=%2Fconnect%2Fiphone" className="btn btn-primary">Sign in to your account</a>
-            {signupsOpen() && (
-              <a href="/signup" className="btn btn-primary">
-                Create account
-              </a>
-            )}
-            <form method="post" action="/api/auth/logout">
-              <button type="submit" className="btn">Sign out</button>
-            </form>
-          </div>
-        </div>
-      </section>
     </>
   );
 }

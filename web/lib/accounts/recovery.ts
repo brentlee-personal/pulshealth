@@ -2,7 +2,6 @@
 import { createHash } from "node:crypto";
 import { query, transaction, type QueryFn } from "../db";
 import { mailConfig, sendMail } from "../email";
-import { demoUserId } from "../mode";
 import { revokeAllGrants } from "../oauth/store";
 import { publicBase } from "./mail";
 import { newToken, tokenHash } from "./session";
@@ -37,7 +36,7 @@ export async function requestPasswordReset(email: string, ip: string): Promise<{
     const accounts = await q<{ id: string; email: string; password_hash: string }>(
       `SELECT id::text, email, password_hash FROM auth.accounts
        WHERE email = $1 AND disabled_at IS NULL AND password_hash IS NOT NULL
-         AND ($2::uuid IS NULL OR user_id <> $2::uuid) FOR UPDATE`, [email, demoUserId()],
+       FOR UPDATE`, [email],
     );
     const account = accounts[0];
     if (!account) return null;
@@ -65,7 +64,7 @@ export async function usablePasswordReset(token: string): Promise<boolean> {
   return (await query(`SELECT 1 FROM auth.password_resets r JOIN auth.accounts a ON a.id = r.account_id
     WHERE r.token_hash = $1 AND r.expires_at > now() AND a.disabled_at IS NULL
       AND a.password_hash = r.password_hash AND a.password_changed_at IS NOT DISTINCT FROM r.password_changed_at
-      AND ($2::uuid IS NULL OR a.user_id <> $2::uuid)`, [hash, demoUserId()])).length > 0;
+      `, [hash])).length > 0;
 }
 
 /** Account lock first, like login/password/OAuth; concurrent use has one winner. */
@@ -75,7 +74,7 @@ export async function completePasswordReset(token: string, passwordHash: string)
   return transaction(async (q) => {
     const accounts = await q<{ id: string }>(`SELECT a.id::text FROM auth.accounts a
       WHERE a.id = (SELECT account_id FROM auth.password_resets WHERE token_hash = $1)
-        AND a.disabled_at IS NULL AND ($2::uuid IS NULL OR a.user_id <> $2::uuid) FOR UPDATE`, [hash, demoUserId()]);
+        AND a.disabled_at IS NULL FOR UPDATE`, [hash]);
     if (!accounts[0]) return false;
     const accountId = accounts[0].id;
     const used = await q(`DELETE FROM auth.password_resets r USING auth.accounts a

@@ -2,7 +2,6 @@ import { oauthResources } from "@/lib/oauth/config";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
-import { DEMO_ASSISTANT_REFUSAL } from "@/lib/accounts/messages";
 import { notFound } from "@/lib/oauth/http";
 import { oauthConfig } from "@/lib/oauth/config";
 import { createCode, findClient } from "@/lib/oauth/store";
@@ -34,9 +33,6 @@ export async function POST(request: NextRequest) {
   if (!config) return notFound();
   const session = await requestSession(request);
   if (!session) return text(401, "Sign in required.");
-  // The demo account is shared by strangers and view-only: no assistant is
-  // ever connected to it, and nothing is sent back to the app.
-  if (session.demo) return text(403, DEMO_ASSISTANT_REFUSAL);
 
   const form = await readForm(request);
   const params = new URLSearchParams();

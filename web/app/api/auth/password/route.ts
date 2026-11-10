@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { accountsOnly, refuseDemo, field, readForm, requestIp, requestSession, seeOther, setSessionCookie } from "@/lib/accounts/http";
+import { accountsOnly, field, readForm, requestIp, requestSession, seeOther, setSessionCookie } from "@/lib/accounts/http";
 import { hashPassword, newPasswordProblem, verifyPassword } from "@/lib/accounts/password";
 import { authFailures, failureKeys, refundAll, takeAll } from "@/lib/accounts/ratelimit";
 import { changePasswordAndSession, findPasswordHash } from "@/lib/accounts/store";
@@ -18,8 +18,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  const demo = refuseDemo(session);
-  if (demo) return demo;
 
   const form = await readForm(request);
   const password = field(form, "password");

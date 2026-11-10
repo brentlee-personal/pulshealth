@@ -10,7 +10,7 @@ export type RouteClass =
   | "health"
   /** Build assets and icons the sign-in page itself needs. Nothing personal. */
   | "asset"
-  /** Signing in, asking for an account, accepting an invite, the demo: reachable without a session. */
+  /** Signing in, asking for an account and accepting an invite need no session. */
   | "public"
   /**
    * The OAuth endpoints other servers and apps call (metadata, registration,
@@ -24,12 +24,8 @@ export type RouteClass =
   /** Everything else: a valid session or nothing. */
   | "protected";
 
-/**
- * Paths reachable without a session (beyond assets and the health check).
- * /demo is a route handler that signs into the demo account, or answers 404
- * when there is none (app/demo/route.ts).
- */
-export const PUBLIC_PAGES = ["/login", "/signup", "/demo", "/forgot-password"] as const;
+/** Paths reachable without a session, beyond assets and the health check. */
+export const PUBLIC_PAGES = ["/login", "/signup", "/forgot-password"] as const;
 // Sign-out too: leaving a session that already expired should not be an
 // error. Every POST, these included, still has to pass the origin check.
 export const PUBLIC_API = ["/api/auth/login", "/api/auth/invite", "/api/auth/logout", "/api/auth/signup", "/api/auth/forgot-password", "/api/auth/reset-password"] as const;

@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { AuthCard } from "@/components/AuthCard";
-import { DEMO_ASSISTANT_REFUSAL } from "@/lib/accounts/messages";
 import { oauthConfig } from "@/lib/oauth/config";
 import { findClient } from "@/lib/oauth/store";
 import { checkAuthorizeRequest, redirectWith } from "@/lib/oauth/validate";
@@ -48,20 +47,6 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Se
   const params = searchParamsOf(await searchParams);
   const session = await currentSession();
   if (!session) redirect(`/login?next=${encodeURIComponent(`/oauth/authorize?${params.toString()}`)}`);
-  // The shared demo account never connects an assistant (the decision route
-  // refuses it too): no form, and nothing sent back to the app.
-  if (session.demo) {
-    return (
-      <div style={{ display: "grid", placeItems: "center", padding: "32px 0" }}>
-        <AuthCard title="This is the demo account" error={DEMO_ASSISTANT_REFUSAL}>
-          <form method="post" action="/api/auth/logout">
-            <button type="submit" className="btn btn-block">Sign out of the demo</button>
-          </form>
-        </AuthCard>
-      </div>
-    );
-  }
-
   const client = await findClient(params.get("client_id"));
   const check = checkAuthorizeRequest(params, client, oauthResources(config));
   if (check.kind === "fatal") {

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { accountsOnly, refuseDemo, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
+import { accountsOnly, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
 import { revokeConnectedApp } from "@/lib/oauth/store";
 
 // "Revoke" next to an AI assistant on the account page: the grant stops
@@ -15,8 +15,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  const demo = refuseDemo(session);
-  if (demo) return demo;
   const form = await readForm(request);
   try {
     await revokeConnectedApp(session.accountId, field(form, "id"));

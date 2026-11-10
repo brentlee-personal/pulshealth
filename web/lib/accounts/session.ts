@@ -9,25 +9,17 @@
 // forward at most once an hour — and 90 days from sign-in at most, so a
 // stolen cookie that is kept warm still dies.
 //
-// The public demo (WEB_DEMO_USER, app/demo/route.ts) is the exception: its
-// sessions last two hours from the visit and never slide, and store no user
-// agent or address — many strangers share that one account.
-//
 // Server-only (node:crypto, the database).
 
 import { createHash, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import { query, type QueryFn } from "../db";
-import { demoUserId } from "../mode";
 
 export const SESSION_COOKIE = "__Host-puls-session";
 export const SESSION_DAYS = 30;
 /** Absolute lifetime from sign-in; sliding never extends a session past it. */
 export const SESSION_ABSOLUTE_DAYS = 90;
 const SESSION_MAX_AGE_SECONDS = SESSION_DAYS * 86_400;
-/** A demo session's whole life, from the visit; it never slides. */
-export const DEMO_SESSION_HOURS = 2;
-export const DEMO_SESSION_MAX_AGE_SECONDS = DEMO_SESSION_HOURS * 3_600;
 const TOKEN_BYTES = 32;
 // 32 bytes in unpadded base64url.
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
@@ -69,13 +61,6 @@ export interface Session {
   selfService: boolean;
   /** Database-authorized erasure: approved sign-up or operator-marked personal account. */
   canDelete?: boolean;
-  /**
-   * The shared demo account's (WEB_DEMO_USER): view-only. Every route and
-   * action that changes anything refuses it (lib/accounts/http.ts
-   * `refuseDemo`); it is never an administrator or self-service, whatever
-   * the rows say.
-   */
-  demo: boolean;
   /** True when this lookup slid the expiry forward (re-send the cookie). */
   refreshed: boolean;
 }
@@ -84,7 +69,7 @@ export interface Session {
  * The live session a cookie names, or null: unknown, expired (sliding or
  * absolute), or its account disabled or without a password. `touch` slides
  * an active session's expiry (proxy.ts does, once an hour at most); pages
- * only read. A demo session never slides.
+ * only read.
  */
 export async function findSession(token: string | null | undefined, touch = false): Promise<Session | null> {
   const id = tokenHash(token);
@@ -105,6 +90,7 @@ export async function findSession(token: string | null | undefined, touch = fals
        FROM auth.sessions s
        JOIN auth.accounts a ON a.id = s.account_id
       WHERE s.id = $1
+        AND s.purpose = 'personal'
         AND s.expires_at > now()
         AND s.created_at > now() - make_interval(days => $2)
         AND a.disabled_at IS NULL
@@ -113,13 +99,13 @@ export async function findSession(token: string | null | undefined, touch = fals
   );
   const row = rows[0];
   if (!row) return null;
-  const demo = row.user_id === demoUserId();
   let refreshed = false;
-  if (touch && row.stale && !demo) {
+  if (touch && row.stale) {
     const slid = await query(
       `UPDATE auth.sessions
           SET last_seen_at = now(), expires_at = now() + make_interval(days => $2)
-        WHERE id = $1 AND last_seen_at < now() - interval '1 hour'
+        WHERE id = $1 AND purpose = 'personal' AND expires_at > now()
+          AND last_seen_at < now() - interval '1 hour'
       RETURNING 1`,
       [id, SESSION_DAYS],
     );
@@ -130,10 +116,9 @@ export async function findSession(token: string | null | undefined, touch = fals
     accountId: row.account_id,
     userId: row.user_id,
     email: row.email,
-    isAdmin: row.is_admin && !demo,
-    selfService: row.self_service && !demo,
-    canDelete: row.can_delete && !demo,
-    demo,
+    isAdmin: row.is_admin,
+    selfService: row.self_service,
+    canDelete: row.can_delete,
     refreshed,
   };
 }
@@ -148,29 +133,13 @@ export interface SessionMeta {
 export async function createSession(accountId: string, meta: SessionMeta, q: QueryFn = query): Promise<string> {
   const token = newToken();
   await q(
-    `INSERT INTO auth.sessions (id, account_id, expires_at, user_agent, ip)
-     VALUES ($1, $2, now() + make_interval(days => $3), $4, $5)`,
+    `INSERT INTO auth.sessions (id, account_id, expires_at, user_agent, ip, purpose)
+     VALUES ($1, $2, now() + make_interval(days => $3), $4, $5, 'personal')`,
     [tokenHash(token), accountId, SESSION_DAYS, meta.userAgent?.slice(0, 300) ?? null, meta.ip && isIP(meta.ip) ? meta.ip : null],
   );
   // Expired rows (sliding or absolute) are deleted by the database's hourly
   // job (auth.prune_signups, 018_web_accounts_hardening.sql), not here: a
   // sweep on every sign-in scanned the whole table on the request path.
-  return token;
-}
-
-/**
- * Starts a session on the shared demo account; returns the cookie's token.
- * It ends DEMO_SESSION_HOURS after now and never slides (findSession), and
- * records neither the browser nor the address: strangers share this account,
- * and nothing about any one of them is kept.
- */
-export async function createDemoSession(accountId: string): Promise<string> {
-  const token = newToken();
-  await query(
-    `INSERT INTO auth.sessions (id, account_id, expires_at, user_agent, ip)
-     VALUES ($1, $2, now() + make_interval(hours => $3), NULL, NULL)`,
-    [tokenHash(token), accountId, DEMO_SESSION_HOURS],
-  );
   return token;
 }
 
@@ -188,7 +157,7 @@ export async function signedInFrom(email: string, ip: string): Promise<boolean> 
     `SELECT 1
        FROM auth.sessions s
        JOIN auth.accounts a ON a.id = s.account_id
-      WHERE a.email = $1 AND s.ip = $2::inet
+      WHERE a.email = $1 AND s.ip = $2::inet AND s.purpose = 'personal'
         AND s.expires_at > now()
         AND s.created_at > now() - make_interval(days => $3)
       LIMIT 1`,
@@ -221,7 +190,7 @@ export async function listSessions(accountId: string, currentId: Buffer): Promis
   }>(
     `SELECT id, created_at, last_seen_at, user_agent, host(ip) AS ip
        FROM auth.sessions
-      WHERE account_id = $1 AND expires_at > now()
+      WHERE account_id = $1 AND purpose = 'personal' AND expires_at > now()
         AND created_at > now() - make_interval(days => $2)
       ORDER BY last_seen_at DESC`,
     [accountId, SESSION_ABSOLUTE_DAYS],

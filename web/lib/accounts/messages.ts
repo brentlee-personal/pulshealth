@@ -26,8 +26,6 @@ const ERRORS: Record<string, string> = {
   own_account: "You cannot disable or enable your own account here.",
   admin_account: "Administrators' accounts are managed from the server, not here.",
   none_selected: "No one was ticked. Tick the ones to decline first.",
-  demo: "Not available on the demo account. It shows sample data, and nothing about it can be changed.",
-  demo_busy: "Too many demo visits from your network. Try again in a few minutes.",
 };
 
 const NOTICES: Record<string, string> = {
@@ -47,9 +45,6 @@ const NOTICES: Record<string, string> = {
   deleted: "Your account and health records have been removed from the live database.",
 };
 
-/** The OAuth consent page's answer to a demo session (no assistant connects to the demo). */
-export const DEMO_ASSISTANT_REFUSAL =
-  "AI assistants cannot connect to the demo account. Sign out, then sign in with your own account to connect one.";
 
 /** One query parameter as a single string (Next.js hands over string | string[]). */
 export function param(value: string | string[] | undefined): string | undefined {

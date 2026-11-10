@@ -34,5 +34,5 @@ export { categoryAggregation, getDailySparklines, getLatestMany, getSeries, getT
 export { getStats } from "./data/stats";
 export { getActivityRings } from "./data/rings";
 export { getWorkoutDetail, getWorkouts, getWorkoutSeries } from "./data/workouts";
-export { DEFAULT_MAX_HR, getProfile, getUser, getUsers, profileFromDob, profileFromStoredValues } from "./data/users";
+export { DEFAULT_MAX_HR, getProfile, getUser, profileFromDob, profileFromStoredValues } from "./data/users";
 export { getSleepSessions } from "./data/sleep";

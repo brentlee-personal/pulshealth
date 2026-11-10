@@ -45,7 +45,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
 
   const sessionFor = async (account: string): Promise<Buffer> => {
     const id = createHash("sha256").update(randomUUID()).digest();
-    await admin.query("INSERT INTO auth.sessions (id, account_id, expires_at) VALUES ($1, $2, now() + interval '1 day')", [id, account]);
+    await admin.query("INSERT INTO auth.sessions (id, account_id, expires_at, purpose) VALUES ($1, $2, now() + interval '1 day', 'personal')", [id, account]);
     return id;
   };
   const grantRow = (id: string) =>

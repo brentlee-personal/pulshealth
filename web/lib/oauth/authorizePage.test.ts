@@ -101,14 +101,4 @@ describe("the consent page", () => {
     expect(html).not.toContain("read all health data");
   });
 
-  it("offers the demo account no consent form, only a way to sign out", async () => {
-    viewer.currentSession.mockResolvedValue({ email: "demo@demo.invalid", demo: true });
-    const html = await render(QUERY);
-    expect(navigation.redirect).not.toHaveBeenCalled();
-    expect(html).toContain("AI assistants cannot connect to the demo account");
-    expect(html).not.toContain('action="/oauth/authorize"');
-    expect(html).toContain('action="/api/auth/logout"');
-    expect(links(html).some((href) => href.startsWith(REDIRECT))).toBe(false);
-    expect(store.findClient).not.toHaveBeenCalled();
-  });
 });

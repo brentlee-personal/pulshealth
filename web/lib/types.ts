@@ -138,6 +138,6 @@ export interface DataSourceInfo {
   // "error": no usable database (unset, unreachable, or the wrong role in
   // accounts mode) and demo fallback is disabled (production). Pages show
   // "Database unavailable" (lib/data/source.ts), never fabricated demo data.
-  source: "live" | "demo" | "error";
+  source: "live" | "error";
   detail: string;
 }

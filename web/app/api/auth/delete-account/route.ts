@@ -1,6 +1,6 @@
 import { after, type NextRequest } from "next/server";
 
-import { accountsOnly, refuseDemo, clearSessionCookie, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
+import { accountsOnly, clearSessionCookie, field, readForm, requestSession, seeOther } from "@/lib/accounts/http";
 import { completeDeletion, requestDeletion } from "@/lib/accounts/deletion";
 
 // Revoke access and durably queue erasure, then try to finish it now. The
@@ -12,8 +12,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  const demo = refuseDemo(session);
-  if (demo) return demo;
   if (session.isAdmin || !session.canDelete) return seeOther("/account?error=forbidden");
   const form = await readForm(request);
   if (field(form, "confirm") !== "yes") return seeOther("/account?error=failed");

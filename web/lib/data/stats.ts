@@ -1,7 +1,6 @@
 // Catalog-wide stats: rows and date range per type, for one user.
 
 import { scoped } from "../db";
-import { demoStats } from "../demo";
 import type { TypeStat } from "../types";
 import { staleWhileRevalidate } from "./cache";
 import { liveRead } from "./source";
@@ -16,7 +15,7 @@ export const getStats: (userId: string) => Promise<Map<string, TypeStat>> = stal
 
 async function loadStats(userId: string): Promise<Map<string, TypeStat>> {
   const out = new Map<string, TypeStat>();
-  return liveRead("getStats", () => new Map(demoStats().map((s) => [s.identifier, s])), async () => {
+  return liveRead("getStats", async () => {
     return await scoped(userId, async (q) => {
       // One statement per table, never a UNION ALL of the two: as web_app
       // (accounts mode) that ran as a Parallel Append whose quantity half

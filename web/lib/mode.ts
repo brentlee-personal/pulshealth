@@ -1,22 +1,6 @@
-// Which kind of access control this viewer runs, decided from the environment
-// on every call (one published image serves all three: edit .env,
-// `docker compose up -d web`).
-//
-//   accounts  WEB_ACCOUNTS=true. People sign in with their own email and
-//             password and see only their own records; the viewer connects
-//             as the web_app role, which the database scopes per user
-//             (server/db/migrations/015_web_accounts.sql). Needs HTTPS.
-//   basic     WEB_AUTH_PASSWORD set. One shared password over HTTP Basic, any
-//             user selectable (lib/auth.ts). Unchanged from before accounts.
-//   open      Neither. No login at all; the bind address is the only guard.
-//
-// Accounts mode wins when both are set: the shared password would otherwise
-// sit in front of a login that already identifies the person.
+// Personal accounts are the only viewer identity.
 
-import { DEFAULT_USER_ID } from "./config";
-import { isUuid } from "./uuid";
-
-export type ViewerMode = "accounts" | "basic" | "open";
+export type ViewerMode = "accounts";
 
 /** The environment, or a stand-in for it in tests. */
 export type Env = Record<string, string | undefined>;
@@ -27,9 +11,13 @@ export function isTrue(value: string | undefined): boolean {
 }
 
 export function viewerMode(env: Env = process.env): ViewerMode {
-  if (isTrue(env.WEB_ACCOUNTS)) return "accounts";
-  if (env.WEB_AUTH_PASSWORD) return "basic";
-  return "open";
+  for (const name of ["WEB_AUTH_PASSWORD", "WEB_DEMO_USER", "PULS_USER_ID", "PULS_MULTI_USER", "PULS_API_TOKEN"]) {
+    if (env[name]?.trim()) throw new Error(`${name} is retired; use personal accounts`);
+  }
+  if (!parseFlag("WEB_ACCOUNTS", env.WEB_ACCOUNTS, true)) {
+    throw new Error("WEB_ACCOUNTS=false is retired; personal accounts are required");
+  }
+  return "accounts";
 }
 
 /**
@@ -72,39 +60,5 @@ export function trustProxyHeaders(env: Env = process.env): boolean {
     return parseFlag("TRUST_PROXY_HEADERS", env.TRUST_PROXY_HEADERS);
   } catch {
     return false;
-  }
-}
-
-/**
- * WEB_DEMO_USER read strictly: the user id lower-cased, null when empty or
- * unset, and an error naming the variable for anything that is not a UUID —
- * or that is the household's default user (PULS_USER_ID, or the seeded one):
- * anyone can open the demo, so it must be a user holding only sample data.
- * instrumentation.ts stops the viewer on an error at startup.
- */
-export function parseDemoUser(env: Env = process.env): string | null {
-  const v = (env.WEB_DEMO_USER ?? "").trim();
-  if (v === "") return null;
-  if (!isUuid(v)) throw new Error(`WEB_DEMO_USER must be the demo user's UUID, got ${JSON.stringify(v)}`);
-  const id = v.toLowerCase();
-  if (id === DEFAULT_USER_ID || id === (env.PULS_USER_ID ?? "").trim().toLowerCase()) {
-    throw new Error("WEB_DEMO_USER names the household's default user (PULS_USER_ID); the demo must be a user that holds only sample data");
-  }
-  return id;
-}
-
-/**
- * The user whose account is the public demo (`/demo` signs visitors into
- * it, view-only), or null when there is none. Accounts mode only; ignored in
- * the others. The demo account is the auth.accounts row with this user_id,
- * created by `make web-demo`. A malformed value stops the server at startup;
- * should one reach a request anyway, it means "no demo", so /demo is a 404.
- */
-export function demoUserId(env: Env = process.env): string | null {
-  if (viewerMode(env) !== "accounts") return null;
-  try {
-    return parseDemoUser(env);
-  } catch {
-    return null;
   }
 }

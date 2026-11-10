@@ -9,7 +9,7 @@ const saved = process.env.WEB_ACCOUNTS;
 beforeEach(() => {
   process.env.WEB_ACCOUNTS = "true";
   for (const call of Object.values(calls)) call.mockReset();
-  calls.session.mockResolvedValue({ id: Buffer.alloc(32), canDelete: true, isAdmin: false, demo: false });
+  calls.session.mockResolvedValue({ id: Buffer.alloc(32), canDelete: true, isAdmin: false });
   calls.request.mockResolvedValue({ userId: "10000000-0000-4000-8000-000000000001", receipt: "r".repeat(43) });
 });
 afterAll(() => {

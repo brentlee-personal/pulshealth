@@ -14,7 +14,7 @@ const DAY = 86400_000;
 // Range bounds follow the metric page selector, with padding for complete nights.
 // Keep a start_ts bound for chunk pruning through accounts security barriers.
 export async function getSleepSessions(userId: string, range: RangeKey = "30D", now = Date.now()): Promise<SleepSession[]> {
-  return liveRead("getSleepSessions", () => demoSleep(range, now), async () => {
+  return liveRead("getSleepSessions", async () => {
     const timeZone = await reportingTimeZone(userId);
     const earliest = range === "ALL" ? (await getStats(userId)).get("HKCategoryTypeIdentifierSleepAnalysis")?.earliest : null;
     if (range === "ALL" && earliest == null) return [];

@@ -29,8 +29,8 @@ describe("register", () => {
 
   it("stops at startup on a TRUST_PROXY_HEADERS no service accepts", async () => {
     const { outcome, error } = await run({ TRUST_PROXY_HEADERS: "ture", WEB_ACCOUNTS: "true" });
-    expect(outcome).toBe("exit 1");
-    expect(error.join("\n")).toMatch(/TRUST_PROXY_HEADERS must be true or false/);
+    expect(outcome).toMatch(/TRUST_PROXY_HEADERS must be true or false/);
+    expect(error).toEqual([]);
     expect((await run({ TRUST_PROXY_HEADERS: "Yes", WEB_ACCOUNTS: "true" })).outcome).toBe("ok");
     expect((await run({ TRUST_PROXY_HEADERS: "" })).outcome).toBe("ok");
   });
@@ -42,15 +42,12 @@ describe("register", () => {
     expect(cf.warn, cf.warn.join("\n")).toEqual([]);
   });
 
-  it("stops at startup on a WEB_DEMO_USER that is not a UUID, and says when the demo is on or ignored", async () => {
-    const bad = await run({ WEB_ACCOUNTS: "true", WEB_DEMO_USER: "demo" });
-    expect(bad.outcome).toBe("exit 1");
-    expect(bad.error.join("\n")).toMatch(/WEB_DEMO_USER must be the demo user's UUID/);
-    const on = await run({ WEB_ACCOUNTS: "true", WEB_DEMO_USER: "0d3a0000-0000-4000-8000-0000000000ab", WEB_CLIENT_IP_HEADER: "cf-connecting-ip", TRUST_PROXY_HEADERS: "on" });
-    expect(on.outcome).toBe("ok");
-    expect(on.warn).toEqual([]);
-    const ignored = await run({ WEB_DEMO_USER: "0d3a0000-0000-4000-8000-0000000000ab" });
-    expect(ignored.outcome).toBe("ok");
-    expect(ignored.warn.join("\n")).toMatch(/WEB_DEMO_USER is set but ignored/);
-  });
+  it.each(["WEB_AUTH_PASSWORD", "WEB_DEMO_USER", "PULS_USER_ID", "PULS_MULTI_USER", "PULS_API_TOKEN"])(
+    "refuses the retired %s setting without revealing its value", async (name) => {
+      const result = await run({ [name]: "synthetic-private-value" });
+      expect(result.outcome).toContain(name);
+      expect(result.outcome).not.toContain("synthetic-private-value");
+    },
+  );
+
 });

@@ -10,7 +10,7 @@ import { GET, PUT, POST, DELETE } from "@/app/api/native/profile/route";
 import { POST as connect } from "@/app/api/auth/connect-account/route";
 import { classifyPath, decideAccounts } from "./policy";
 const token = "A".repeat(43);
-const session = { id: Buffer.alloc(32, 1), accountId: "account", userId: "own-user", email: "old@example.com", demo: false };
+const session = { id: Buffer.alloc(32, 1), accountId: "account", userId: "own-user", email: "old@example.com" };
 function request(method = "GET", body?: unknown, authorization: string | null = `Bearer ${token}`) {
   const headers: Record<string, string> = { "content-type": "application/json", cookie: `__Host-puls-session=${token}` };
   if (authorization) headers.authorization = authorization;
@@ -38,11 +38,9 @@ describe("native account profile", () => {
     expect(mocks.findSession).not.toHaveBeenCalled();
     expect(mocks.scoped).not.toHaveBeenCalled();
   });
-  it("refuses expired and demo sessions before accessing a profile", async () => {
-    for (const value of [null, { ...session, demo: true }]) {
-      mocks.findSession.mockResolvedValue(value);
-      expect((await PUT(request("PUT", profile))).status).toBe(401);
-    }
+  it("refuses an expired session before accessing a profile", async () => {
+    mocks.findSession.mockResolvedValue(null);
+    expect((await PUT(request("PUT", profile))).status).toBe(401);
     expect(mocks.query).not.toHaveBeenCalled();
     expect(mocks.scoped).not.toHaveBeenCalled();
   });
@@ -86,6 +84,7 @@ describe("native account profile", () => {
     const [sql, params] = mocks.query.mock.calls[1];
     expect(mocks.query.mock.calls[0][0]).toMatch(/FOR UPDATE OF a/);
     expect(sql).toMatch(/s.id = h.source_session/);
+    expect(sql).toContain("s.purpose = 'personal'");
     expect(sql).toMatch(/DELETE FROM auth.native_handoffs/);
     expect(sql).toMatch(/expires_at > now\(\)/);
     expect(params[1]).toBe(createHash("sha256").update(verifier).digest("base64url"));

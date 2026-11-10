@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ q: vi.fn(), scoped: vi.fn(), stats: vi.fn() })
 vi.mock("./stats", () => ({ getStats: mocks.stats }));
 vi.mock("../db", () => ({ scoped: mocks.scoped }));
 vi.mock("../reportingTimeZone", () => ({ reportingTimeZone: async () => "America/Los_Angeles" }));
-vi.mock("./source", () => ({ liveRead: async (_: string, _demo: unknown, read: () => unknown) => read() }));
+vi.mock("./source", () => ({ liveRead: async (_: string, read: () => unknown) => read() }));
 import { getSleepSessions } from "./sleep";
 beforeEach(() => {
   vi.clearAllMocks();

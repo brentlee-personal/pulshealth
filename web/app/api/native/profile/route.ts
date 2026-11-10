@@ -26,7 +26,7 @@ async function handle(request: NextRequest, method: "GET" | "PUT" | "DELETE") {
   const off = accountsOnly(); if (off) return off;
   try {
     const session = await authenticate(request);
-    if (!session || session.demo) return answer(401, { error: "Sign in to your personal account again." });
+    if (!session) return answer(401, { error: "Sign in to your personal account again." });
     if (method === "DELETE") { await deleteSession(session.id); return answer(200, {}); }
     if (method === "GET") return answer(200, await profile(session));
     const raw = await readBodyCapped(request);
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
           WHERE h.code_hash = $1 AND h.challenge = $2 AND h.expires_at > now()
             AND a.id = h.account_id AND a.disabled_at IS NULL AND a.password_hash IS NOT NULL
             AND s.id = h.source_session AND s.account_id = a.id
-            AND s.expires_at > now() AND s.created_at > now() - interval '90 days' 
+            AND s.purpose = 'personal' AND s.expires_at > now() AND s.created_at > now() - interval '90 days'
           RETURNING h.account_id::text`, [tokenHash(code), challenge]);
       return rows[0] ? createSession(rows[0].account_id, { userAgent: "PulsHealth iPhone account", ip: null }, q) : null;
     });

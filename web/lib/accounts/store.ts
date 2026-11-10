@@ -35,47 +35,6 @@ export async function findAccountForLogin(email: string): Promise<LoginAccount |
   return row ? { id: row.id, userId: row.user_id, passwordHash: row.password_hash } : null;
 }
 
-/** What /demo needs to know about the account WEB_DEMO_USER names. */
-export interface DemoAccount {
-  id: string;
-  disabled: boolean;
-  hasPassword: boolean;
-  isAdmin: boolean;
-  /** Made by an approved sign-up, so the viewer's self-service may act on it. */
-  selfService: boolean;
-}
-
-/** The demo user's account, whatever its state, or null when it has none. */
-export async function findDemoAccount(userId: string): Promise<DemoAccount | null> {
-  const rows = await query<{ id: string; disabled: boolean; has_password: boolean; is_admin: boolean; self_service: boolean }>(
-    `SELECT a.id::text, a.disabled_at IS NOT NULL AS disabled, a.password_hash IS NOT NULL AS has_password, a.is_admin,
-            EXISTS (SELECT 1 FROM auth.self_service_users ss WHERE ss.user_id = a.user_id) AS self_service
-       FROM auth.accounts a
-      WHERE a.user_id = $1`,
-    [userId],
-  );
-  const row = rows[0];
-  return row
-    ? { id: row.id, disabled: row.disabled, hasPassword: row.has_password, isAdmin: row.is_admin, selfService: row.self_service }
-    : null;
-}
-
-/**
- * Why the demo account cannot take visitors, or null when it can. It must
- * exist, be enabled and have a password hash (findSession wants one), and be
- * an operator-made, ordinary account: never an administrator, and never one
- * an approved sign-up made — the viewer's self-service functions may mint
- * sync tokens for those and purge them, and the database's own checks are
- * what keep the viewer away from the household's users.
- */
-export function demoAccountProblem(account: DemoAccount | null): "missing" | "disabled" | "admin" | "self-service" | null {
-  if (!account) return "missing";
-  if (account.disabled || !account.hasPassword) return "disabled";
-  if (account.isAdmin) return "admin";
-  if (account.selfService) return "self-service";
-  return null;
-}
-
 export async function findPasswordHash(accountId: string): Promise<string | null> {
   const rows = await query<{ password_hash: string | null }>(
     "SELECT password_hash FROM auth.accounts WHERE id = $1 AND disabled_at IS NULL",
@@ -141,7 +100,7 @@ export async function changePasswordAndSession(
     // Check after acquiring the account lock: a reset that preceded this
     // request may have revoked its session even when the password is equal.
     const session = await q(
-      `SELECT 1 FROM auth.sessions WHERE id = $1 AND account_id = $2
+      `SELECT 1 FROM auth.sessions WHERE id = $1 AND account_id = $2 AND purpose = 'personal'
          AND expires_at > now() AND created_at > now() - make_interval(days => $3)
        FOR UPDATE`,
       [sessionId, accountId, SESSION_ABSOLUTE_DAYS],

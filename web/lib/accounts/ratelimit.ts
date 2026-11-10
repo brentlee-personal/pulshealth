@@ -189,14 +189,3 @@ export function refundAll(limiter: FailureLimiter, keys: string[], now = Date.no
 // globalThis for the same reason as authFailures.
 const globalForSignups = globalThis as typeof globalThis & { __pulsSignups?: FailureLimiter };
 export const signupRequests: FailureLimiter = (globalForSignups.__pulsSignups ??= new FailureLimiter(3, 0.05));
-
-// Demo sessions (/demo): twenty an hour per client address, every one
-// charged — starting one is not a failure, but each is a row, and nothing
-// legitimate starts more. Its own bucket, never the sign-in failure buckets
-// above: /demo is a GET, which any page can make a browser send.
-export const DEMO_SESSIONS_PER_HOUR = 20;
-const globalForDemo = globalThis as typeof globalThis & { __pulsDemoSessions?: FailureLimiter };
-export const demoSessions: FailureLimiter = (globalForDemo.__pulsDemoSessions ??= new FailureLimiter(
-  DEMO_SESSIONS_PER_HOUR,
-  DEMO_SESSIONS_PER_HOUR / 60,
-));

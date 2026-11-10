@@ -49,7 +49,7 @@ async function proxy(req: NextRequest) {
   return run(req);
 }
 
-describe("every mode", () => {
+describe("personal route headers", () => {
   it("sends a nonce'd Content-Security-Policy and hands the nonce to the page", async () => {
     const res = await proxy(request("/"));
     const csp = res.headers.get("content-security-policy")!;
@@ -66,25 +66,21 @@ describe("every mode", () => {
   });
 });
 
-describe("open and basic mode (unchanged)", () => {
-  it("serves everything when no password is set", async () => {
-    expect(passed(await proxy(request("/workouts")))).toBe(true);
+describe("personal accounts by default", () => {
+  it("requires sign-in without an opt-in flag and ignores a target user", async () => {
+    process.env.TRUST_PROXY_HEADERS = "true";
+    findSession.mockResolvedValue(null);
+    const response = await proxy(request("/workouts?user=22222222-2222-4222-8222-222222222222", { headers: viaProxy }));
+    expect(response.status).toBe(303);
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+    expect(response.cookies.get("puls-user")).toBeUndefined();
   });
 
-  it("challenges without the password and serves with it", async () => {
-    process.env.WEB_AUTH_PASSWORD = "pw";
-    const challenged = await proxy(request("/"));
-    expect(challenged.status).toBe(401);
-    expect(challenged.headers.get("www-authenticate")).toContain("Basic");
-    const auth = `Basic ${btoa("any:pw")}`;
-    expect(passed(await proxy(request("/", { headers: { authorization: auth } })))).toBe(true);
-    expect(passed(await proxy(request("/api/healthz")))).toBe(true);
-  });
-
-  it("still turns ?user= into the cookie", async () => {
-    const res = await proxy(request("/workouts?user=22222222-2222-4222-8222-222222222222"));
-    expect(res.status).toBe(303);
-    expect(res.cookies.get("puls-user")?.value).toBe("22222222-2222-4222-8222-222222222222");
+  it("rejects the retired Basic setting without echoing its value", async () => {
+    process.env.WEB_AUTH_PASSWORD = "synthetic-secret";
+    await expect(proxy(request("/"))).rejects.toThrow(/WEB_AUTH_PASSWORD/);
+    await expect(proxy(request("/"))).rejects.not.toThrow(/synthetic-secret/);
+    expect(findSession).not.toHaveBeenCalled();
   });
 });
 
@@ -190,10 +186,6 @@ describe("accounts mode", () => {
     expect(res.status).toBe(503);
   });
 
-  it("ignores WEB_AUTH_PASSWORD", async () => {
-    process.env.WEB_AUTH_PASSWORD = "pw";
-    expect(passed(await proxy(request("/login", { headers: viaProxy })))).toBe(true);
-  });
 });
 
 describe("OAuth for AI assistants", () => {
@@ -219,9 +211,9 @@ describe("OAuth for AI assistants", () => {
     "p".repeat(43) +
     "&code_challenge_method=S256&state=s";
 
-  it("answers 404 on every OAuth path while OAuth is off, in every mode", async () => {
+  it("answers 404 on every OAuth path while OAuth is off", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const env of [{}, { WEB_AUTH_PASSWORD: "pw" }, { WEB_ACCOUNTS: "true", TRUST_PROXY_HEADERS: "true" }]) {
+    for (const env of [{}, { WEB_ACCOUNTS: "true", TRUST_PROXY_HEADERS: "true" }]) {
       Object.assign(process.env, env);
       for (const path of OAUTH_PATHS) {
         for (const method of ["GET", "POST"]) {

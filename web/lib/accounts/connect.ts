@@ -7,7 +7,6 @@ export type ConnectionResult = { ok: true; link: string } | { ok: false; code: s
 /** Both the account page and the app handoff use the same pairing rules. */
 export async function connectPhone(account: Session | null, name: string): Promise<ConnectionResult> {
   if (!account) return { ok: false, code: "session", error: "Sign in again, then try once more." };
-  if (account.demo) return { ok: false, code: "demo", error: errorMessage("demo")! };
   let url: string;
   try {
     const parsed = new URL(process.env.WEB_INGEST_URL?.trim() ?? "");

@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
   if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Fconnect%2Fiphone");
-  if (session.demo) return seeOther("/connect/iphone?error=demo");
   const state = await connectPhone(session, field(await readForm(request), "name"));
   if (!state.ok) return seeOther(`/connect/iphone?error=${state.code}`);
   return seeOther(state.link);

@@ -2,7 +2,6 @@
 
 import { cache } from "react";
 import { scoped } from "../db";
-import { demoWorkoutDetail, demoWorkouts, demoWorkoutSeries } from "../demo";
 import type {
   RoutePoint,
   Workout,
@@ -17,7 +16,7 @@ import { liveRead } from "./source";
 
 // ── workouts ─────────────────────────────────────────────────────────────
 export async function getWorkouts(userId: string, limit = 40): Promise<Workout[]> {
-  return liveRead("getWorkouts", () => demoWorkouts(limit), async () => {
+  return liveRead("getWorkouts", async () => {
     const rows = await scoped(userId, (q) => q<{
       uuid: string;
       activity_type: string;
@@ -57,7 +56,7 @@ export async function getWorkouts(userId: string, limit = 40): Promise<Workout[]
 // React-cached per request on (userId, uuid): generateMetadata and the page
 // both ask for the same workout.
 export const getWorkoutDetail = cache(async function getWorkoutDetail(userId: string, uuid: string): Promise<WorkoutDetail | null> {
-  return liveRead("getWorkoutDetail", () => demoWorkoutDetail(uuid), async () => {
+  return liveRead("getWorkoutDetail", async () => {
     // A non-uuid path segment can never match a live row; skip the query (and
     // the cast error) and report not-found.
     if (!isUuid(uuid)) return null;
@@ -162,7 +161,7 @@ interface RawActivity {
 
 // ── one workout's intra-workout series streams ────────────────────────────
 export async function getWorkoutSeries(userId: string, uuid: string): Promise<WorkoutSeries[]> {
-  return liveRead("getWorkoutSeries", () => demoWorkoutSeries(uuid), async () => {
+  return liveRead("getWorkoutSeries", async () => {
     if (!isUuid(uuid)) return [];
     const rows = await scoped(userId, (q) => q<{ identifier: string; unit: string | null; t: string; value: number }>(
       `SELECT st.identifier,

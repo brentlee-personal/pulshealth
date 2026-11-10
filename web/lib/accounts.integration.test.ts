@@ -452,12 +452,12 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     for (let i = 0; i < AUTH_FAILURE_BURST; i++) authFailures.fail(`email:${EMAIL}`);
     const accountId = (await admin.query("SELECT id::text FROM auth.accounts WHERE email = $1", [EMAIL])).rows[0].id;
     await admin.query(
-      "INSERT INTO auth.sessions (id, account_id, expires_at, ip) VALUES ($1, $2, now() + interval '1 day', '198.51.100.90')",
+      "INSERT INTO auth.sessions (id, account_id, expires_at, ip, purpose) VALUES ($1, $2, now() + interval '1 day', '198.51.100.90', 'personal')",
       [randomBytes(32), accountId],
     );
     // An expired session's address proves nothing.
     await admin.query(
-      "INSERT INTO auth.sessions (id, account_id, expires_at, ip) VALUES ($1, $2, now() - interval '1 minute', '198.51.100.91')",
+      "INSERT INTO auth.sessions (id, account_id, expires_at, ip, purpose) VALUES ($1, $2, now() - interval '1 minute', '198.51.100.91', 'personal')",
       [randomBytes(32), accountId],
     );
     const login = (ip: string) => loginRoute.POST(post("/api/auth/login", { email: EMAIL, password: "another long passphrase" }, { ip }));
@@ -474,10 +474,10 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     const slid = randomBytes(32);
     const capped = randomBytes(32);
     await admin.query(
-      `INSERT INTO auth.sessions (id, account_id, created_at, expires_at) VALUES
-         ($1, $4, now(), now() + interval '1 day'),
-         ($2, $4, now() - interval '40 days', now() - interval '1 minute'),
-         ($3, $4, now() - interval '91 days', now() + interval '1 day')`,
+      `INSERT INTO auth.sessions (id, account_id, created_at, expires_at, purpose) VALUES
+         ($1, $4, now(), now() + interval '1 day', 'personal'),
+         ($2, $4, now() - interval '40 days', now() - interval '1 minute', 'personal'),
+         ($3, $4, now() - interval '91 days', now() + interval '1 day', 'personal')`,
       [live, slid, capped, accountId],
     );
     const present = async () =>

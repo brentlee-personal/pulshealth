@@ -16,11 +16,6 @@ export default async function ConnectPage({ searchParams }: { searchParams: Sear
   const login = "/login?next=%2Fconnect%2Fiphone";
   if (!session) redirect(login);
   const search = await searchParams;
-  if (session.demo) {
-    return <AuthCard title="Connect your own account" subtitle="The demo shows sample data. Sign in to your own account to sync this iPhone.">
-      <a className="btn btn-primary btn-block" href={login}>Sign in to your account</a>
-    </AuthCard>;
-  }
   return <AuthCard title="Connect this iPhone" subtitle={<>Signed in as {session.email}.</>}
     error={errorMessage(param(search.error), { sync_address: "This database’s sync address has not been configured. Contact the person who runs it." })}>
     <p style={{ margin: "0 0 20px", fontSize: 14, lineHeight: 1.55 }}>

@@ -7,7 +7,6 @@ export async function POST(request: NextRequest) {
   const off = accountsOnly(); if (off) return off;
   const session = await requestSession(request);
   if (!session) return seeOther("/login?next=%2Faccount");
-  if (session.demo) return seeOther("/account?error=demo");
   const form = await readForm(request);
   const state = field(form, "state");
   const challenge = field(form, "challenge");

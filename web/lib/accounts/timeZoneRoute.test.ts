@@ -10,7 +10,7 @@ function request(zone: string) {
   const body = new FormData(); body.set("time_zone", zone);
   return new NextRequest("https://viewer.example/api/auth/time-zone", { method: "POST", body });
 }
-beforeEach(() => { vi.stubEnv("WEB_ACCOUNTS", "true"); db.query.mockReset().mockResolvedValue([]); sessions.findSession.mockResolvedValue({ id, demo: false }); });
+beforeEach(() => { vi.stubEnv("WEB_ACCOUNTS", "true"); db.query.mockReset().mockResolvedValue([]); sessions.findSession.mockResolvedValue({ id }); });
 afterEach(() => vi.unstubAllEnvs());
 describe("reporting zone form", () => {
   it("saves a valid selection using only the authenticated session", async () => {
@@ -22,9 +22,9 @@ describe("reporting zone form", () => {
     expect((await POST(request("Invalid/Zone"))).headers.get("location")).toBe("/account?error=time_zone");
     expect(db.query).not.toHaveBeenCalled();
   });
-  it("refuses demo account mutations", async () => {
-    sessions.findSession.mockResolvedValue({ id, demo: true });
-    expect((await POST(request("UTC"))).headers.get("location")).toBe("/account?error=demo");
+  it("refuses an expired session before any mutation", async () => {
+    sessions.findSession.mockResolvedValue(null);
+    expect((await POST(request("UTC"))).headers.get("location")).toBe("/login?next=%2Faccount");
     expect(db.query).not.toHaveBeenCalled();
   });
 });

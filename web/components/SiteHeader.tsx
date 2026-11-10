@@ -14,8 +14,7 @@ const links = [
   { label: "Consulting", href: "https://pulshealth.com/consulting/" },
 ];
 
-export function SiteHeader({ demo = false, open, toggleMenu, headerRef, toggleRef }: {
-  demo?: boolean;
+export function SiteHeader({ open, toggleMenu, headerRef, toggleRef }: {
   open: boolean;
   toggleMenu: () => void;
   headerRef: RefObject<HTMLElement | null>;
@@ -35,7 +34,6 @@ export function SiteHeader({ demo = false, open, toggleMenu, headerRef, toggleRe
     <header className="site-header" ref={headerRef}>
       <div className="site-header-inner">
         <a href="https://pulshealth.com/" className="site-brand"><BrandMark size={28} /><span>PulsHealth</span></a>
-        {demo && <span className="mobile-demo" title="Shared, view-only demo with sample data">Demo</span>}
         <nav className="site-primary" aria-label="Primary">
           {links.map(item => item.href === "/" ? (
             <Link key={item.label} href="/" className="site-nav-link" aria-current="location">{item.label}</Link>

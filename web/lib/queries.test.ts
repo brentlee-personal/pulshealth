@@ -10,7 +10,8 @@ const scopedStatements = vi.hoisted(() => [] as { userId: string; sql: string }[
 // take a second pooled connection while the first is held (see lib/db.ts).
 const nested = vi.hoisted(() => ({ depth: 0, calls: [] as string[] }));
 vi.mock("./db", () => ({
-  healthQuery: (sql: string, params?: unknown[]) => queryMock(sql, params),
+  healthQuery: (sql: string, params?: unknown[]) => sql.includes("has_table_privilege")
+    ? Promise.resolve([{ role: "web_app", direct: false }]) : queryMock(sql, params),
   query: (sql: string, params?: unknown[]) => {
     if (nested.depth > 0) nested.calls.push(sql);
     return queryMock(sql, params);
@@ -330,11 +331,9 @@ describe("query semantics", () => {
     calls.push(["getSleepSessions", "sleep all time", (x) => x.getSleepSessions(USER_ID, "ALL")]);
     calls.push(["getSleepSessions", "sleep sessions", (x) => x.getSleepSessions(USER_ID)]);
     calls.push(["getProfile", "profile", (x) => x.getProfile(USER_ID)]);
-    // Not health data, read outside any scope: the source probe and Basic
-    // mode's switcher list.
+    // The source probe carries no personal health values.
     calls.push(["getDataSource", "source", (x) => x.getDataSource()]);
-    calls.push(["getUsers", "users", (x) => x.getUsers()]);
-    const UNSCOPED = new Set(["getDataSource", "getUsers"]);
+    const UNSCOPED = new Set(["getDataSource"]);
     for (const [fn, name, call] of calls) {
       vi.resetModules();
       nested.calls.length = 0;
@@ -482,24 +481,22 @@ describe("with no live database", () => {
 
   it("throws the error source in production, never demo data or an empty chart", async () => {
     await withoutDatabase("production", async (x) => {
-      expect(await x.getDataSource()).toEqual({ source: "error", detail: "No DATABASE_URL configured" });
+      expect(await x.getDataSource()).toEqual({ source: "error", detail: "Personal storage is not configured" });
       for (const [name, read] of reads) {
         const failure = await read(x).then(() => null, (e: unknown) => e);
         expect(x.isDataUnavailable(failure), name).toBe(true);
       }
-      // The layout's switcher list is the exception: a layout is outside its
-      // page's error boundary, so it reads as empty instead.
-      expect(await x.getUsers()).toEqual([]);
       expect(queryMock).not.toHaveBeenCalled();
     });
   });
 
-  it("serves demo data outside production", async () => {
+  it("keeps development reads unavailable without storage", async () => {
     await withoutDatabase("development", async (x) => {
-      expect((await x.getDataSource()).source).toBe("demo");
-      for (const [name, read] of reads) await expect(read(x), name).resolves.toBeDefined();
-      expect((await x.getWorkouts(USER_ID)).length).toBeGreaterThan(0);
-      expect((await x.getUsers()).length).toBeGreaterThan(0);
+      expect((await x.getDataSource()).source).toBe("error");
+      for (const [name, read] of reads) {
+        const failure = await read(x).then(() => null, (error: unknown) => error);
+        expect(x.isDataUnavailable(failure), name).toBe(true);
+      }
       expect(queryMock).not.toHaveBeenCalled();
     });
   });

@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AuthCard } from "@/components/AuthCard";
 import { errorMessage, noticeMessage, param } from "@/lib/accounts/messages";
-import { demoUserId, signupsOpen, viewerMode } from "@/lib/mode";
+import { signupsOpen, viewerMode } from "@/lib/mode";
 import { currentSession, safeReturnPath } from "@/lib/viewer";
 
 // Sign in (accounts mode only). The form posts to /api/auth/login, which
@@ -18,12 +18,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   const params = await searchParams;
   const next = safeReturnPath(param(params.next));
 
-  // Already signed in: nothing to do here — except from the demo, which
-  // signing in to one's own account replaces (/api/auth/login retires the
-  // browser's session). A database that cannot be reached still gets the
-  // form; the sign-in itself then says so.
+  // A failed session lookup leaves the sign-in form available.
   const session = await currentSession().catch(() => null);
-  if (session && !session.demo) redirect(next);
+  if (session) redirect(next);
 
   return (
     <AuthCard
@@ -53,12 +50,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
       ) : (
         <p className="form-hint" style={{ margin: "18px 0 0", lineHeight: 1.5 }}>
           Accounts are by invitation. To join, ask the person who runs this viewer for an invite link. Forgotten your password? <a href="/forgot-password">Reset it by email</a>.
-        </p>
-      )}
-      {demoUserId() && !session && (
-        <p className="form-hint" style={{ margin: "10px 0 0", lineHeight: 1.5 }}>
-          Just looking? <a href="/demo" style={{ textDecoration: "underline" }}>Explore the demo</a>, with sample data and
-          no account needed.
         </p>
       )}
     </AuthCard>
