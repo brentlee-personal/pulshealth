@@ -7,7 +7,7 @@ import { oauthKeyFixture } from "./oauth/keyFixture";
 import { createCode, exchangeCode, registerClient } from "./oauth/store";
 import { issueAccessToken, type APIPrincipal } from "./oauth/jwt";
 import { type ReadPermissions } from "./oauth/permissions";
-import { createSession, tokenHash } from "./accounts/session";
+import { createSession, findSession, newToken, tokenHash } from "./accounts/session";
 import { requireIntegrationDatabases } from "./integrationEnv";
 
 const databases = requireIntegrationDatabases();
@@ -80,6 +80,30 @@ describe.skipIf(!databases.available || !apiUrl)("personal API credential author
         await admin.query("DELETE FROM public.users WHERE id=$1", [member]);
       }
       await admin.end();
+    }
+  });
+
+  it("refuses a browser session without personal sign-in proof", async () => {
+    const token = newToken();
+    const id = tokenHash(token);
+    if (!id) throw new Error("Synthetic session token is invalid");
+    await admin.query("INSERT INTO auth.sessions(id,account_id,expires_at) VALUES($1,$2,now()+interval '1 hour')", [id, accountA]);
+    try {
+      expect(await findSession(token)).toBeNull();
+    } finally {
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1", [id]);
+    }
+  });
+
+  it("refuses an API credential derived from an untyped legacy session", async () => {
+    const token = newToken();
+    const id = tokenHash(token);
+    if (!id) throw new Error("Synthetic session token is invalid");
+    await admin.query("INSERT INTO auth.sessions(id,account_id,expires_at) VALUES($1,$2,now()+interval '1 hour')", [id, accountA]);
+    try {
+      expect(await createAPICredential(signer, { kind: "session", sessionId: id, permissions: narrow })).toBeNull();
+    } finally {
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1", [id]);
     }
   });
 
