@@ -13,7 +13,8 @@ import { oauthKeyFixture } from "./oauth/keyFixture";
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { Client } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { issueAccessToken, signAccessToken, verifyAccessToken } from "./oauth/jwt";
 
 import { requireIntegrationDatabases } from "./integrationEnv";
 
@@ -117,6 +118,57 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
       { ...PERMISSIONS, time_range: { from: "2027-01-01T00:00:00Z", until: "2026-01-01T00:00:00Z" } },
     ]) await expect(admin.query("UPDATE auth.oauth_grants SET permissions=$2 WHERE id=$1", [grant.grantId, JSON.stringify(invalid)])).rejects.toMatchObject({ code: "23514" });
     expect((await admin.query("SELECT permissions FROM auth.oauth_grants WHERE id=$1", [grant.grantId])).rows[0].permissions).toEqual(PERMISSIONS);
+  });
+
+  it("checks the signed grant version and complete scope against the live database before forwarding", async () => {
+    const resource = `${ISSUER}/api/health`;
+    const code = await oauth.createCode(accountId, request({ resource }), PERMISSIONS);
+    const exchanged = await exchange(code, { resource, configuredResource: resource });
+    if (!exchanged.ok) throw new Error("exchange failed");
+    const grant = exchanged.grant;
+    const config = { issuer: ISSUER, resource, ...oauthKeys };
+    const signed = (userId = PERSON, version = 1, permissions = PERMISSIONS) => issueAccessToken(config, userId, clientId, undefined,
+      { grantId: grant.grantId, authorizationVersion: version, permissions }).token;
+    const { GET } = await import("../app/api/health/v1/[...path]/route");
+    const read = (token: string, type = PERMISSIONS.record_types[0]) => GET(new NextRequest(
+      `${resource}/v1/metrics/daily?types=${encodeURIComponent(type)}&start=1767571200000&end=1767657600000`,
+      { headers: { Authorization: `Bearer ${token}` } }), { params: Promise.resolve({ path: ["metrics", "daily"] }) });
+    const oldUrl = process.env.PULS_API_URL, oldToken = process.env.PULS_API_TOKEN;
+    process.env.PULS_API_URL = "http://synthetic-api:8081";
+    process.env.PULS_API_TOKEN = "synthetic-internal-only";
+    const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ metrics: [] }));
+    try {
+      const token = signed();
+      expect((await read(token)).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      const legacy = verifyAccessToken(token, config);
+      if (!legacy) throw new Error("test signature failed");
+      delete legacy.principal;
+      expect((await read(signAccessToken(legacy, config.signingKey))).status).toBe(401);
+      expect((await read(signed(OTHER))).status).toBe(401);
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      await admin.query("UPDATE auth.oauth_grants SET authorization_version=2 WHERE id=$1", [grant.grantId]);
+      expect((await read(token)).status).toBe(401);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      const current = signed(PERSON, 2);
+      expect((await read(current)).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      const changed = { ...PERMISSIONS, record_types: ["oura.sleep"] };
+      await admin.query("UPDATE auth.oauth_grants SET permissions=$2 WHERE id=$1", [grant.grantId, JSON.stringify(changed)]);
+      expect((await read(current)).status).toBe(401);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      const narrowed = signed(PERSON, 2, changed);
+      expect((await read(narrowed, "oura.sleep")).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(3);
+      await admin.query("UPDATE auth.oauth_grants SET revoked_at=now() WHERE id=$1", [grant.grantId]);
+      expect((await read(narrowed, "oura.sleep")).status).toBe(401);
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      upstream.mockRestore();
+      if (oldUrl === undefined) delete process.env.PULS_API_URL; else process.env.PULS_API_URL = oldUrl;
+      if (oldToken === undefined) delete process.env.PULS_API_TOKEN; else process.env.PULS_API_TOKEN = oldToken;
+    }
   });
 
   beforeAll(async () => {

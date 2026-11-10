@@ -48,15 +48,3 @@ export function permissionsFromForm(form: FormData | null): ReadPermissions | nu
   };
   return readPermissions({ operations: form?.getAll("operation"), record_types: form?.getAll("record_type"), time_range: { from: utc("from"), until: utc("until") } });
 }
-
-export function permissionsEqual(left: ReadPermissions, right: ReadPermissions): boolean {
-  return left.operations.length === right.operations.length && left.operations.every((op) => right.operations.includes(op)) &&
-    left.record_types.length === right.record_types.length && left.record_types.every((type) => right.record_types.includes(type)) &&
-    instant(left.time_range.from) === instant(right.time_range.from) && instant(left.time_range.until) === instant(right.time_range.until);
-}
-
-export function withinPermissionRange(permissions: ReadPermissions, from: string, until: string): boolean {
-  const start = instant(from), end = instant(until);
-  const allowedStart = instant(permissions.time_range.from), allowedEnd = instant(permissions.time_range.until);
-  return start !== null && end !== null && allowedStart !== null && allowedEnd !== null && start < end && start >= allowedStart && end <= allowedEnd;
-}

@@ -46,7 +46,8 @@ describe("public account-scoped health API", () => {
     const [url, options] = fetcher.mock.calls[0];
     expect(String(url)).toBe(`http://api:8081/v1/users?user=${user}`);
     expect(options).toMatchObject({ redirect: "error", cache: "no-store", headers: { Authorization: "Bearer internal-only" } });
-    expect(query).toHaveBeenCalledWith(expect.any(String), [user, "pc_test", config.resource, grant]);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("g.authorization_version = $5 AND g.permissions = $6::jsonb"),
+      [user, "pc_test", config.resource, grant, 1, JSON.stringify(permissions)]);
   });
   it("rejects cross-account, duplicated, unknown, and unbounded queries", async () => {
     for (const path of [`users?user=${other}`, `users?user=${user}&user=${user}`, "users?debug=true", "workouts?limit=500", "metrics/daily?start=1&end=9999999999999", "sleep/daily", "export", "constructor", "toString", "__proto__"]) {
@@ -57,6 +58,14 @@ describe("public account-scoped health API", () => {
   it("revoked or disabled accounts cannot read even with an unexpired token", async () => {
     vi.mocked(query).mockResolvedValue([]);
     expect((await request("users")).status).toBe(401);
+  });
+  it("returns 503 when the live authorization database is unavailable", async () => {
+    vi.mocked(query).mockRejectedValue(new Error("synthetic authorization outage"));
+    const fetcher = vi.spyOn(globalThis, "fetch");
+    const response = await request("users");
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("synthetic authorization outage");
+    expect(fetcher).not.toHaveBeenCalled();
   });
   it("does not leak upstream errors or the deployment token", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private internal-only", { status: 401 }));

@@ -26,7 +26,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   const authorization = request.headers.get("authorization") ?? "";
   const claims = authorization.startsWith("Bearer ")
     ? verifyAccessToken(authorization.slice(7), { ...config, resource: healthResource(config) }) : null;
-  if (!claims || !isUuid(claims.grant_id)) return answer(401, { error: "invalid_token" });
+  if (!claims || !isUuid(claims.grant_id) || !claims.principal) return answer(401, { error: "invalid_token" });
+  const principal = claims.principal;
   const path = (await context.params).path.join("/");
   const allowed = Object.hasOwn(routes, path) ? routes[path] : undefined;
   if (!allowed) return answer(404, { error: "not_found" });
@@ -56,8 +57,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
       `SELECT g.id::text FROM auth.oauth_grants g JOIN auth.accounts a ON a.id = g.account_id
        WHERE a.user_id = $1 AND g.client_id = $2 AND g.resource = $3
          AND g.id = $4 AND g.revoked_at IS NULL AND g.refresh_expires_at > now()
+         AND g.authorization_version = $5 AND g.permissions = $6::jsonb
          AND a.disabled_at IS NULL AND a.password_hash IS NOT NULL LIMIT 1`,
-      [claims.sub, claims.client_id, healthResource(config), claims.grant_id],
+      [claims.sub, claims.client_id, healthResource(config), claims.grant_id, principal.authorization_version,
+        JSON.stringify({ operations: principal.allowed_operations, record_types: principal.allowed_types, time_range: principal.allowed_time_range })],
     );
     if (!grants.length) return answer(401, { error: "invalid_token" });
     const base = process.env.PULS_API_URL;
