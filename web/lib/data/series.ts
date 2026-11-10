@@ -334,9 +334,6 @@ export async function getTodayTotals(userId: string, identifiers: string[]): Pro
 }
 
 // ── batched daily sparklines for a set of quantity types (one round-trip) ──
-const demoSparkline = (identifier: string, days: number) =>
-  demoSeries(identifier, "30D").points.slice(-days).map((p) => p.value);
-
 export async function getDailySparklines(userId: string, identifiers: string[], days = 21): Promise<Map<string, number[]>> {
   const out = new Map<string, number[]>();
   if (!identifiers.length) return out;

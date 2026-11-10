@@ -2,10 +2,8 @@ import { scoped } from "../db";
 import { reportingTimeZone } from "../reportingTimeZone";
 import { sleepSessions, type SleepSample, type SleepSession, type SleepStage } from "../sleep";
 import { sleepRangeDates } from "../sleepTimeline";
-import { RANGES } from "../metrics";
 import type { RangeKey } from "../types";
 import { getStats } from "./stats";
-import { configuredTimeZone } from "../config";
 import { liveRead } from "./source";
 
 const STAGES: Record<number, SleepStage> = { 0: "inBed", 1: "unspecified", 2: "awake", 3: "core", 4: "deep", 5: "rem" };
@@ -37,22 +35,4 @@ export async function getSleepSessions(userId: string, range: RangeKey = "30D", 
     }] : []);
     return sleepSessions(samples, timeZone).filter((s) => s.date >= first && s.date <= last);
   });
-}
-
-function demoSleep(range: RangeKey, now: number): SleepSession[] {
-  const samples: SleepSample[] = [];
-  const midnight = Math.floor(now / DAY) * DAY;
-  for (let day = 0; day < Math.ceil((RANGES[range].spanMs ?? 365 * DAY) / DAY) + 1; day++) {
-    let start = midnight - day * DAY - 3600_000 + Math.round(Math.sin(day * 1.7) * 65) * 60_000;
-    for (let cycle = 0; cycle < 5; cycle++) {
-      for (const [stage, minutes] of [["core", 40 + (day % 5) * 3], ["deep", 17 - cycle * 2], ["rem", 17 + cycle * 3], ["awake", 2 + day % 4]] as const) {
-        const end = start + minutes * 60_000;
-        samples.push({ start, end, stage, source: "demo", sourceName: "Sample watch" });
-        start = end;
-      }
-    }
-  }
-  const zone = configuredTimeZone();
-  const { first, last } = sleepRangeDates(range, now, zone, samples.at(-1)?.start);
-  return sleepSessions(samples.filter((s) => s.end <= now), zone).filter((s) => s.date >= first && s.date <= last);
 }
