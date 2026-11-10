@@ -10,24 +10,22 @@ import (
 	"time"
 )
 
-// A by-hand install from .env.example must not come up with a token anyone
-// can guess; an unset PULS_TOKEN (device tokens only) is fine.
-func TestRefusePlaceholder(t *testing.T) {
-	for _, value := range []string{"change-me", " change-me\n", "CHANGE-ME"} {
-		err := refusePlaceholder("PULS_TOKEN", value)
-		if err == nil {
-			t.Fatalf("refusePlaceholder(%q) = nil, want an error", value)
-		}
-		for _, want := range []string{"PULS_TOKEN", "scripts/bootstrap.sh", "openssl rand -hex 32"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q does not mention %q", err, want)
+func TestRetiredUploadConfigurationIsRefused(t *testing.T) {
+	for _, name := range []string{"PULS_TOKEN", "PULS_ALLOW_SHARED_TOKEN", "PULS_USER_ID"} {
+		for _, value := range []string{"false", "synthetic-private-value"} {
+			err := validateIngestAuthConfig(func(key string) string {
+				if key == name {
+					return value
+				}
+				return ""
+			})
+			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "synthetic-private-value") {
+				t.Fatalf("retired setting %s was accepted or revealed", name)
 			}
 		}
 	}
-	for _, value := range []string{"", "0123456789abcdef", "change-me-later"} {
-		if err := refusePlaceholder("PULS_TOKEN", value); err != nil {
-			t.Errorf("refusePlaceholder(%q) = %v, want nil", value, err)
-		}
+	if err := validateIngestAuthConfig(func(string) string { return "" }); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -75,7 +75,7 @@ func familyTestSetup(t *testing.T) *familyTestFixture {
 			t.Errorf("clean owned fixture diagnostics: %v", err)
 		}
 	})
-	srv := newServer(store, store, "", false, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	srv := newServer(store, store, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	f.server = httptest.NewServer(srv.routes())
 	t.Cleanup(f.server.Close)
 	return f

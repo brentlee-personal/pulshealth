@@ -24,10 +24,10 @@ type BatchHeader struct {
 	BatchID  string `json:"batchID"`
 	DeviceID string `json:"deviceID"`
 	// UserID is not sent in the body: the handler fills it from the verified
-	// principal before InsertBatch runs. Shared-token mode retains legacy scoping.
+	// principal before InsertBatch runs.
 	UserID string `json:"-"`
 	// DeviceTokenID is the device_tokens row the request authenticated with,
-	// filled by the handler from the auth principal; 0 for the shared token.
+	// filled by the handler from the verified device principal.
 	DeviceTokenID int64 `json:"-"`
 	// WakeID/Trigger are not sent in the body either: the handler fills them from
 	// the X-Wake-ID / X-Wake-Trigger headers (the iOS wake that produced this

@@ -140,10 +140,6 @@ func (s *Server) handleSourceObservation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	p, _ := principalFrom(r.Context())
-	if p.shared {
-		writeJSON(w, http.StatusOK, struct{}{})
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	id, err := s.store.BeginSourceObservation(ctx, p.userID, p.tokenID, key)

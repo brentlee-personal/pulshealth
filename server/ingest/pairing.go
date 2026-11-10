@@ -12,10 +12,8 @@ import (
 //
 //	puls://pair?url=<percent-encoded>&token=<percent-encoded>&user=<uuid>
 //
-// Two things build it, scripts/bootstrap.sh (the shared token, from
-// server/.env) and `ingest devices issue` (a device token, the one moment its
-// plaintext exists), and one thing parses it: PairingPayload.swift in the
-// PulsHealthSync package. Keep all three in step.
+// `ingest devices issue` builds it with the member-bound device token, shown
+// only once. PairingPayload.swift in PulsHealthSync parses it.
 
 // pairingEscape percent-encodes everything but the RFC 3986 unreserved
 // characters, byte by byte with upper-case hex — the same output as

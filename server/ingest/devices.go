@@ -204,8 +204,7 @@ func (st *Store) ListDeviceTokens(ctx context.Context, includeRevoked bool) ([]d
 	return out, rows.Err()
 }
 
-// ActiveDeviceTokenCount is what startup checks when the shared token is off,
-// so an install with no way to authenticate at all is told so in the log.
+// ActiveDeviceTokenCount lets startup report that no device can authenticate.
 func (st *Store) ActiveDeviceTokenCount(ctx context.Context) (int64, error) {
 	var n int64
 	err := st.pool.QueryRow(ctx,

@@ -16,8 +16,17 @@ func TestFamilyStoreRefusesUnvalidatedPersonalBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch.Header.DeviceTokenID = 1
-	if _, err := NewStore(nil).InsertBatch(context.Background(), batch, 0); err == nil {
+	batch.Header.UserID = deviceUser
+	if _, err := NewStore(nil).InsertBatch(context.Background(), batch, 0); err == nil || !strings.Contains(err.Error(), "family protocol validation") {
 		t.Fatal("personal store accepted an unvalidated batch")
+	}
+}
+
+func TestStoreRequiresAuthenticatedMember(t *testing.T) {
+	for _, batch := range []*Batch{nil, {}} {
+		if _, err := NewStore(nil).InsertBatch(context.Background(), batch, 0); err == nil || !strings.Contains(err.Error(), "authenticated batch member") {
+			t.Fatalf("missing member error = %v", err)
+		}
 	}
 }
 

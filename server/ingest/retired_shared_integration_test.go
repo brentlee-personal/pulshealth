@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestIntegrationRetiredSharedUploadCredential(t *testing.T) {
@@ -15,7 +18,7 @@ func TestIntegrationRetiredSharedUploadCredential(t *testing.T) {
 		t.Fatalf("personal device setup status = %d, want 200", status)
 	}
 	const retired = "synthetic-retired-shared-upload"
-	server := httptest.NewServer(newServer(f.store, f.store, retired, true, false,
+	server := httptest.NewServer(newServer(f.store, f.store, false,
 		slog.New(slog.NewJSONHandler(io.Discard, nil))).routes())
 	t.Cleanup(server.Close)
 	for i, actor := range f.actors {
@@ -62,4 +65,17 @@ func TestIntegrationRetiredSharedUploadCredential(t *testing.T) {
 			t.Errorf("retired shared credential wrote %d rows for another member, want 0", rows)
 		}
 	})
+}
+
+func TestIntegrationNoImplicitHealthMember(t *testing.T) {
+	f := familyTestSetup(t)
+	if status, _ := f.post(t, f.actors[0], f.body(f.uuid(0x730), f.uuid(0x731), 60)); status != http.StatusOK {
+		t.Fatalf("personal setup status = %d, want 200", status)
+	}
+	_, err := f.store.pool.Exec(f.ctx, `INSERT INTO public.quantity_samples(uuid,type_id,start_ts,end_ts,value)
+		VALUES($1,(SELECT type_id FROM public.sample_types WHERE identifier='HKQuantityTypeIdentifierHeartRate'),now(),now(),1)`, f.uuid(0x732))
+	var databaseError *pgconn.PgError
+	if !errors.As(err, &databaseError) || databaseError.Code != "23502" {
+		t.Fatal("unowned insert did not return 23502")
+	}
 }

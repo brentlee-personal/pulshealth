@@ -79,7 +79,7 @@ func TestIntegration_IngestRoundTrip(t *testing.T) {
 {"uuid":"%s","type":"HKWorkoutTypeIdentifier","kind":"workout","start":1718000000000,"end":1718003600500,"workout":{"activityType":"running","duration":3600.5,"totalEnergyKcal":450.2,"totalDistanceMeters":8046.7,"statistics":{"HKQuantityTypeIdentifierHeartRate":152.0}}}
 `, batchID, hrUUID, catUUID, wkUUID)
 
-	batch, err := ParseBatch(strings.NewReader(body))
+	batch, err := parseReferenceBatch(strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("ParseBatch: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestIntegration_IngestRoundTrip(t *testing.T) {
 	delBody := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"HKQuantityTypeIdentifierHeartRate","reason":"incremental","exportedAt":1718000100000,"sampleCount":0,"deletionCount":1}
 {"deleted":{"uuid":"%s","type":"HKQuantityTypeIdentifierHeartRate"}}
 `, delBatchID, hrUUID)
-	delBatch, err := ParseBatch(strings.NewReader(delBody))
+	delBatch, err := parseReferenceBatch(strings.NewReader(delBody))
 	if err != nil {
 		t.Fatalf("ParseBatch deletions: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestIntegration_IngestRoundTrip(t *testing.T) {
 	}
 
 	// Stats should include our types with sane bounds.
-	stats, err := store.Stats(ctx, recordScope{userID: defaultUserID})
+	stats, err := store.Stats(ctx, recordScope{userID: referenceMemberID})
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 {"profile":{"name":"Ada Example","email":"ada@example.com","dateOfBirth":631152000000,"biologicalSex":"male"}}
 `, batchID, wkUUID, hbUUID, ecgUUID, somUUID, medUUID, wkUUID, wkUUID, wkUUID)
 
-	batch, err := ParseBatch(strings.NewReader(body))
+	batch, err := parseReferenceBatch(strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("ParseBatch: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 	// Profile upserted onto the (default) user; rows are tagged with that user.
 	var sex, name string
 	if err := pool.QueryRow(ctx,
-		`SELECT biological_sex, name FROM users WHERE id = $1`, defaultUserID).Scan(&sex, &name); err != nil {
+		`SELECT biological_sex, name FROM users WHERE id = $1`, referenceMemberID).Scan(&sex, &name); err != nil {
 		t.Fatalf("verify user: %v", err)
 	}
 	if sex != "male" {
@@ -360,8 +360,8 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 		`SELECT user_id FROM workouts WHERE uuid = $1`, wkUUID).Scan(&rowUser); err != nil {
 		t.Fatalf("verify workout user_id: %v", err)
 	}
-	if rowUser != defaultUserID {
-		t.Errorf("workout user_id = %q, want %q", rowUser, defaultUserID)
+	if rowUser != referenceMemberID {
+		t.Errorf("workout user_id = %q, want %q", rowUser, referenceMemberID)
 	}
 	var labels []string
 	if err := pool.QueryRow(ctx,
@@ -384,7 +384,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 	}
 
 	// Stats must report the hardcoded identifiers for the new tables.
-	stats, err := store.Stats(ctx, recordScope{userID: defaultUserID})
+	stats, err := store.Stats(ctx, recordScope{userID: referenceMemberID})
 	if err != nil {
 		t.Fatalf("Stats: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestIntegration_SeriesKindsAndRoutes(t *testing.T) {
 	} {
 		fmt.Fprintf(&dels, `{"deleted":{"uuid":"%s","type":"%s"}}`+"\n", uuid, typ)
 	}
-	delBatch, err := ParseBatch(strings.NewReader(dels.String()))
+	delBatch, err := parseReferenceBatch(strings.NewReader(dels.String()))
 	if err != nil {
 		t.Fatalf("ParseBatch deletions: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestIntegration_AggregateUpsert(t *testing.T) {
 		body := fmt.Sprintf(`{"batchID":"%s","deviceID":"%s","type":"%s","reason":"manual","exportedAt":1718000000000,"sampleCount":0,"deletionCount":0,"aggregateCount":1}
 {"aggregate":{"type":"%s","func":"average","intervalValue":1,"intervalUnit":"hour","deviceFilter":"watch","bucketStart":%d,"bucketEnd":%d,"value":%s,"unit":"count/min"}}
 `, batchID, deviceID, typeIdent, typeIdent, bucketStart, bucketEnd, value)
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("ParseBatch: %v", err)
 		}
@@ -716,7 +716,7 @@ func TestIntegration_ProfileSnapshotReplacement(t *testing.T) {
 		body := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"HKUserProfile","reason":"manual","exportedAt":1718000000000,"sampleCount":0,"deletionCount":0,"profileCount":1}
 {"profile":%s}
 `, batchID, profile)
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("ParseBatch: %v", err)
 		}
@@ -762,53 +762,28 @@ func TestIntegration_ProfileSnapshotReplacement(t *testing.T) {
 // bytes, computed independently here) and /v1/uuids over HTTP, including the
 // 35-day range guard.
 func TestIntegration_DigestAndUUIDs(t *testing.T) {
-	url := integrationDatabaseURL(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer pool.Close()
-	store := NewStore(pool)
-
-	run := time.Now().UnixNano()
-	// Run-unique type so earlier runs cannot pollute the digest windows.
-	typeIdent := fmt.Sprintf("ITestQuantity%016x", run)
-	batchID := fmt.Sprintf("%08x-0020-4000-8000-%012x", run>>32, run&0xffffffffffff)
-	u1 := fmt.Sprintf("%08x-0021-4000-8000-%012x", run>>32, run&0xffffffffffff)
-	u2 := fmt.Sprintf("%08x-0022-4000-8000-%012x", run>>32, run&0xffffffffffff)
-	u3 := fmt.Sprintf("%08x-0023-4000-8000-%012x", run>>32, run&0xffffffffffff)
+	f := familyTestSetup(t)
+	ctx, run := f.ctx, f.run
+	typeIdent := "HKQuantityTypeIdentifierStepCount"
+	batchID, u1, u2, u3 := f.uuid(0x720), f.uuid(0x721), f.uuid(0x722), f.uuid(0x723)
 
 	juneA := time.Date(2024, 6, 3, 12, 0, 0, 0, time.UTC).UnixMilli()
 	juneB := time.Date(2024, 6, 20, 8, 30, 0, 0, time.UTC).UnixMilli()
 	july := time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
 
 	body := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"%s","reason":"manual","exportedAt":1718000000000,"sampleCount":3,"deletionCount":0}
-{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"value":1.0,"unit":"count"}
-{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"value":2.0,"unit":"count"}
-{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"value":3.0,"unit":"count"}
-`, batchID, typeIdent, u1, typeIdent, juneA, u2, typeIdent, juneB, u3, typeIdent, july)
-
-	batch, err := ParseBatch(strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("ParseBatch: %v", err)
+{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"end":%d,"value":1.0,"unit":"count"}
+{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"end":%d,"value":2.0,"unit":"count"}
+{"uuid":"%s","type":"%s","kind":"quantity","start":%d,"end":%d,"value":3.0,"unit":"count"}
+`, batchID, typeIdent, u1, typeIdent, juneA, juneA, u2, typeIdent, juneB, juneB, u3, typeIdent, july, july)
+	if status, _ := f.post(t, f.actors[0], body); status != http.StatusOK {
+		t.Fatalf("personal sample upload status = %d, want 200", status)
 	}
-	res, err := store.InsertBatch(ctx, batch, int64(len(body)))
-	if err != nil {
-		t.Fatalf("InsertBatch: %v", err)
+	var inserted int
+	if err := f.admin.QueryRow(ctx, "SELECT count(*) FROM public.quantity_samples WHERE user_id=$1", f.actors[0].user).Scan(&inserted); err != nil || inserted != 3 {
+		t.Fatalf("personal stored rows = %d, error = %v, want 3", inserted, err)
 	}
-	if res.Accepted != 3 {
-		t.Fatalf("insert: %+v", res)
-	}
-
-	// newServer, not a bare &Server{}: the auth middleware charges every
-	// request against the failure limiter that constructor installs.
-	srv := newServer(store, store, "itest-token", true, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
-	ts := httptest.NewServer(srv.routes())
-	defer ts.Close()
+	ts := f.server
 
 	get := func(path string) (*http.Response, []byte) {
 		t.Helper()
@@ -816,7 +791,7 @@ func TestIntegration_DigestAndUUIDs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set("Authorization", "Bearer itest-token")
+		req.Header.Set("Authorization", "Bearer "+f.actors[0].token)
 		resp, err := ts.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -949,9 +924,9 @@ func TestIntegration_ReadEndpointsAreUserScoped(t *testing.T) {
 			f.workoutUUID, start.UnixMilli(), start.Add(30*time.Minute).UnixMilli(),
 			f.workoutUUID, start.Add(time.Minute).UnixMilli(), start.Add(2*time.Minute).UnixMilli(),
 			f.workoutUUID, typeIdent, start.Add(time.Minute).UnixMilli(), f.value)
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
-			t.Fatalf("ParseBatch(%s): %v", f.userID, err)
+			t.Fatalf("parseReferenceBatch(%s): %v", f.userID, err)
 		}
 		batch.Header.UserID = f.userID
 		res, err := store.InsertBatch(ctx, batch, int64(len(body)))
@@ -1113,7 +1088,7 @@ func TestIntegration_DeletionsOnCompressedChunk(t *testing.T) {
 	for _, u := range victims {
 		fmt.Fprintf(&sb, `{"deleted":{"uuid":"%s","type":"%s"}}`+"\n", u, typeIdent)
 	}
-	batch, err := ParseBatch(strings.NewReader(sb.String()))
+	batch, err := parseReferenceBatch(strings.NewReader(sb.String()))
 	if err != nil {
 		t.Fatalf("ParseBatch: %v", err)
 	}
@@ -1167,7 +1142,7 @@ func TestIntegration_WakeTelemetryColumns(t *testing.T) {
 {"uuid":"%s","type":"HKQuantityTypeIdentifierHeartRate","kind":"quantity","start":1718000000000,"end":1718000005000,"value":61.0,"unit":"count/min","sourceName":"Apple Watch"}
 `, batchID, hrUUID)
 
-	batch, err := ParseBatch(strings.NewReader(body))
+	batch, err := parseReferenceBatch(strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("ParseBatch: %v", err)
 	}
@@ -1208,7 +1183,7 @@ func TestIntegration_WakeTelemetryColumns(t *testing.T) {
 	bareID := fmt.Sprintf("%08x-00a3-4000-8000-%012x", run>>32, run&0xffffffffffff)
 	bareBody := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"HKQuantityTypeIdentifierHeartRate","reason":"manual","exportedAt":1718000000000,"schemaVersion":1,"clientVersion":"itest","sampleCount":0,"deletionCount":0}
 `, bareID)
-	bareBatch, err := ParseBatch(strings.NewReader(bareBody))
+	bareBatch, err := parseReferenceBatch(strings.NewReader(bareBody))
 	if err != nil {
 		t.Fatalf("ParseBatch bare: %v", err)
 	}
@@ -1285,7 +1260,7 @@ func TestIntegration_LookupSequencesDoNotBurnOnRepeat(t *testing.T) {
 {"uuid":"%s","type":"%s","kind":"quantity","start":1718000000000,"end":1718000005000,"value":7,"unit":"count","sourceName":"ITest Source","sourceBundleID":"com.example.itest","sourceVersion":"1.0","startContext":{"timeZoneID":"America/Los_Angeles","utcOffsetSeconds":-25200,"source":"itest","confidence":"high","tzdbVersion":"2026a"}}
 {"aggregate":{"type":"%s","func":"sum","intervalValue":1,"intervalUnit":"hour","deviceFilter":"watch","bucketStart":1718000000000,"bucketEnd":1718003600000,"value":%d,"unit":"count"}}
 `, batchID, typeIdent, sampleUUID, typeIdent, aggIdent, seq)
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("ParseBatch %d: %v", seq, err)
 		}
@@ -1364,7 +1339,7 @@ func TestIntegration_DeviceTokens(t *testing.T) {
 		t.Fatal("grafana can SELECT device_tokens")
 	}
 
-	srv := newServer(store, store, "itest-shared", true, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	srv := newServer(store, store, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
 
@@ -1395,8 +1370,8 @@ func TestIntegration_DeviceTokens(t *testing.T) {
 	if code, body := do(http.MethodGet, "/v1/capabilities", plaintext, "", ""); code != http.StatusOK {
 		t.Fatalf("capabilities with device token: %d %s", code, body)
 	}
-	if code, body := do(http.MethodGet, "/v1/capabilities", "itest-shared", otherUser, ""); code != http.StatusOK {
-		t.Fatalf("capabilities with shared token: %d %s", code, body)
+	if code, body := do(http.MethodGet, "/v1/capabilities", "itest-shared", otherUser, ""); code != http.StatusUnauthorized {
+		t.Fatalf("retired shared token status: %d %s, want 401", code, body)
 	}
 
 	batchID := fmt.Sprintf("%08x-0202-4000-8000-%012x", run>>32, run&0xffffffffffff)
@@ -1444,8 +1419,7 @@ func TestIntegration_DeviceTokens(t *testing.T) {
 		t.Fatalf("last_seen_at advanced within a minute: %v -> %v", seen1, seen2)
 	}
 
-	// The listing shows it, revoke takes effect on the next request, and the
-	// shared token is unaffected throughout.
+	// Revocation takes effect on the next request; retired credentials stay invalid.
 	tokens, err := store.ListDeviceTokens(ctx, false)
 	if err != nil {
 		t.Fatal(err)
@@ -1493,8 +1467,8 @@ func TestIntegration_DeviceTokens(t *testing.T) {
 	if err := store.RevokeDeviceToken(ctx, issued.ID+1_000_000); !errors.Is(err, errTokenNotFound) {
 		t.Fatalf("revoking a missing id: %v, want errTokenNotFound", err)
 	}
-	if code, _ := do(http.MethodGet, "/v1/capabilities", "itest-shared", "", ""); code != http.StatusOK {
-		t.Fatalf("shared token after revoke: %d", code)
+	if code, _ := do(http.MethodGet, "/v1/capabilities", "itest-shared", "", ""); code != http.StatusUnauthorized {
+		t.Fatalf("retired shared token after revoke: %d, want 401", code)
 	}
 }
 
@@ -1535,7 +1509,7 @@ func TestIntegration_InsertIntoCompressedChunk(t *testing.T) {
 		t.Helper()
 		body := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"%s","reason":"backfill","exportedAt":1718000000000,"sampleCount":%d,"deletionCount":0}`+"\n",
 			batchID, typeIdent, len(lines)) + strings.Join(lines, "\n") + "\n"
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("ParseBatch: %v", err)
 		}
@@ -1652,7 +1626,7 @@ func TestIntegration_QuantityNearDuplicates(t *testing.T) {
 		t.Helper()
 		body := fmt.Sprintf(`{"batchID":"%s","deviceID":"itest","type":"%s","reason":"backfill","exportedAt":1718000000000,"sampleCount":%d,"deletionCount":0}`+"\n",
 			batchID, typeIdent, len(lines)) + strings.Join(lines, "\n") + "\n"
-		batch, err := ParseBatch(strings.NewReader(body))
+		batch, err := parseReferenceBatch(strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("ParseBatch: %v", err)
 		}
@@ -1759,4 +1733,13 @@ func TestIntegration_QuantityNearDuplicates(t *testing.T) {
 			t.Fatalf("%d chunk(s) still uncompressed; the guard would not be tested against the columnstore", uncompressed)
 		}
 	})
+}
+
+// Direct SQL/storage reference fixtures name an owner; they are not authentication proofs.
+func parseReferenceBatch(input io.Reader) (*Batch, error) {
+	batch, err := ParseBatch(input)
+	if batch != nil {
+		batch.Header.UserID = referenceMemberID
+	}
+	return batch, err
 }

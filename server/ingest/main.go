@@ -39,8 +39,6 @@ const (
 	defaultMaxInflightBatches = 4
 	batchSlotWait             = 2 * time.Second
 	batchRetryAfterSeconds    = 5
-	// What server/.env.example ships every secret as; see refusePlaceholder.
-	placeholderSecret = "change-me"
 )
 
 // buildVersion identifies this build in GET /v1/capabilities. The Dockerfile
@@ -116,18 +114,9 @@ func run(logger *slog.Logger) error {
 	if _, err := familyProtocol(); err != nil {
 		return fmt.Errorf("load family protocol: %w", err)
 	}
-	// The shared token is optional since per-device tokens exist (SRV-8):
-	// empty, or PULS_ALLOW_SHARED_TOKEN=false, means only device tokens
-	// authenticate. See auth.go for the order the two are checked in.
-	token := os.Getenv("PULS_TOKEN")
-	if err := refusePlaceholder("PULS_TOKEN", token); err != nil {
+	if err := validateIngestAuthConfig(os.Getenv); err != nil {
 		return err
 	}
-	allowShared, err := parseBoolEnv("PULS_ALLOW_SHARED_TOKEN", os.Getenv("PULS_ALLOW_SHARED_TOKEN"), true)
-	if err != nil {
-		return err
-	}
-	allowShared = allowShared && token != ""
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		return errors.New("DATABASE_URL must be set")
@@ -160,14 +149,14 @@ func run(logger *slog.Logger) error {
 	defer endLifetime()
 
 	store := NewStore(pool)
-	srv := newServer(store, store, token, allowShared, trustProxyHeaders, logger)
+	srv := newServer(store, store, trustProxyHeaders, logger)
 	srv.lifetime = lifetime
 	srv.batchSlots = make(chan struct{}, maxInflightBatches(os.Getenv("PULS_MAX_INFLIGHT_BATCHES")))
-	logAuthMode(logger, allowShared)
+	logAuthMode(logger)
 	logger.Info("auth failure limiting",
 		"burst", authFailureBurst, "per_minute", authFailurePerMinute,
 		"trust_proxy_headers", trustProxyHeaders)
-	if !allowShared {
+	{
 		// Never fatal: the operator may be about to issue one. But an
 		// install with no accepted credential at all should say so.
 		n, err := store.ActiveDeviceTokenCount(ctx)
@@ -175,7 +164,7 @@ func run(logger *slog.Logger) error {
 		case err != nil:
 			logger.Warn("could not count device tokens", "err", err.Error())
 		case n == 0:
-			logger.Warn("no active device tokens and the shared token is disabled: nothing can authenticate",
+			logger.Warn("no active device tokens: nothing can authenticate",
 				"hint", "make devices ARGS='issue --user <uuid> --name <label>'")
 		}
 	}
@@ -210,17 +199,6 @@ func run(logger *slog.Logger) error {
 	// deferred pool.Close waits out its insertDeadline and Compose SIGKILLs.
 	endLifetime()
 	return err
-}
-
-// refusePlaceholder fails startup on a token still set to the .env.example
-// placeholder: an install made by hand from the example, without
-// scripts/bootstrap.sh, would otherwise accept a credential anyone can guess.
-func refusePlaceholder(name, value string) error {
-	if strings.EqualFold(strings.TrimSpace(value), placeholderSecret) {
-		return fmt.Errorf("%s is still the placeholder %q from .env.example: set a random value "+
-			"(scripts/bootstrap.sh generates one, or use `openssl rand -hex 32`)", name, placeholderSecret)
-	}
-	return nil
 }
 
 // maxInflightBatches reads PULS_MAX_INFLIGHT_BATCHES: unset or not a number
@@ -284,11 +262,7 @@ type Server struct {
 	store ingester
 	// tokens resolves per-device bearer tokens (auth.go); nil means none.
 	tokens tokenResolver
-	// sharedToken is PULS_TOKEN; allowShared says whether it authenticates
-	// (false when PULS_ALLOW_SHARED_TOKEN=false or the token is empty).
-	sharedToken string
-	allowShared bool
-	log         *slog.Logger
+	log    *slog.Logger
 
 	// Per-client-IP token bucket charged by failed authentications only
 	// (see ratelimit.go).
@@ -308,12 +282,10 @@ type Server struct {
 	lifetime context.Context
 }
 
-func newServer(store ingester, tokens tokenResolver, sharedToken string, allowShared, trustProxyHeaders bool, log *slog.Logger) *Server {
+func newServer(store ingester, tokens tokenResolver, trustProxyHeaders bool, log *slog.Logger) *Server {
 	return &Server{
 		store:             store,
 		tokens:            tokens,
-		sharedToken:       sharedToken,
-		allowShared:       allowShared && sharedToken != "",
 		log:               log,
 		authFailures:      newFailureLimiter(),
 		trustProxyHeaders: trustProxyHeaders,
@@ -398,11 +370,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	decodedBody := http.MaxBytesReader(w, io.NopCloser(body), maxDecodedBody)
 	defer decodedBody.Close()
 
-	parse := ParseBatch
-	if p, ok := principalFrom(r.Context()); ok && p.tokenID > 0 {
-		parse = ParseFamilyBatch
-	}
-	batch, err := parse(decodedBody)
+	batch, err := ParseFamilyBatch(decodedBody)
 	parseDur := time.Since(start)
 	if err != nil {
 		var pve *ProtocolVersionError
@@ -428,7 +396,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The auth middleware settled the user before the body was read: the
-	// device token's user, or (shared token) X-User-ID / the default user.
+	// device token's user. A client header never selects the member.
 	// Every data row is stored under this id and the {"profile":…} line
 	// upserts the matching users row. The token id is recorded on the batch.
 	userID, ok := readUserID(w, r)

@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	hdrLine = `{"batchID":"6f1c1f1e-2a3b-4c5d-8e9f-0a1b2c3d4e5f","deviceID":"dev-1","type":"HKQuantityTypeIdentifierHeartRate","reason":"incremental","exportedAt":1718000000000,"sampleCount":%d,"deletionCount":%d}`
+	referenceMemberID = "5ea4d000-0000-4000-8000-000000000001"
+	hdrLine           = `{"batchID":"6f1c1f1e-2a3b-4c5d-8e9f-0a1b2c3d4e5f","deviceID":"dev-1","type":"HKQuantityTypeIdentifierHeartRate","reason":"incremental","exportedAt":1718000000000,"sampleCount":%d,"deletionCount":%d}`
 
 	hrSample = `{"uuid":"11111111-1111-4111-8111-111111111111","type":"HKQuantityTypeIdentifierHeartRate","kind":"quantity","start":1718000000000,"end":1718000005000,"value":62.5,"unit":"count/min","category":null,"sourceName":"Apple Watch","sourceBundleID":"com.apple.health","sourceVersion":"10.0","device":"Apple Watch","metadata":{"HKMetadataKeyHeartRateMotionContext":1},"workout":null}`
 
@@ -778,7 +779,10 @@ func (f *fakeStore) Ping(ctx context.Context) error {
 }
 
 func newTestServer(fs *fakeStore) *Server {
-	return newServer(fs, nil, "secret", true, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	resolver := newFakeResolver()
+	resolver.add("secret", deviceToken{ID: 1, UserID: referenceMemberID, Status: "active",
+		SourceConnectionID: "00000000-0000-4000-8000-000000000011", SourceActive: true})
+	return newServer(fs, resolver, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 }
 
 func gzipBody(t *testing.T, s string) *bytes.Buffer {
@@ -1042,8 +1046,8 @@ func TestHandleDigest_Params(t *testing.T) {
 		fs.gotFrom.UnixMilli() != 1700000000000 || fs.gotTo.UnixMilli() != 1718000000000 {
 		t.Errorf("store got type=%q from=%v to=%v", fs.gotType, fs.gotFrom, fs.gotTo)
 	}
-	if fs.gotUserID != defaultUserID {
-		t.Errorf("store got user=%q, want default %q", fs.gotUserID, defaultUserID)
+	if fs.gotUserID != referenceMemberID {
+		t.Errorf("store got user=%q, want default %q", fs.gotUserID, referenceMemberID)
 	}
 }
 

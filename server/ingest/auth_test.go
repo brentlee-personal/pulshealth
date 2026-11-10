@@ -53,44 +53,30 @@ const (
 
 // newDeviceTestServer is newTestServer plus a resolver holding one active and
 // one revoked token, both for deviceUser.
-func newDeviceTestServer(fs *fakeStore, allowShared bool) (*Server, *fakeResolver) {
+func newDeviceTestServer(fs *fakeStore) (*Server, *fakeResolver) {
 	fr := newFakeResolver()
 	fr.add(activeTok, deviceToken{ID: 7, UserID: deviceUser, Status: "active", SourceConnectionID: "00000000-0000-4000-8000-000000000010", SourceActive: true})
 	fr.add(revokedTok, deviceToken{ID: 8, UserID: deviceUser, Status: "revoked"})
-	srv := newServer(fs, fr, "secret", allowShared, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	srv := newServer(fs, fr, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	return srv, fr
 }
 
-func TestSharedTokenStillAuthenticatesWithoutALookup(t *testing.T) {
+func TestRetiredSharedTokenCannotSelectMember(t *testing.T) {
 	fs := &fakeStore{}
-	srv, fr := newDeviceTestServer(fs, true)
-
-	if code, _ := authAttempt(t, srv, "secret", devicePeer, nil); code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", code)
+	srv, _ := newDeviceTestServer(fs)
+	for _, headers := range []map[string]string{nil, {"X-User-ID": otherUser}, {"X-User-ID": "nope"}} {
+		if code, _ := authAttempt(t, srv, "secret", devicePeer, headers); code != http.StatusUnauthorized {
+			t.Errorf("retired shared credential status = %d, want 401", code)
+		}
 	}
-	if fs.gotUserID != defaultUserID {
-		t.Fatalf("store user = %q, want the default user when X-User-ID is absent", fs.gotUserID)
-	}
-	if code, _ := authAttempt(t, srv, "secret", devicePeer, map[string]string{"X-User-ID": otherUser}); code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", code)
-	}
-	if fs.gotUserID != otherUser {
-		t.Fatalf("store user = %q, want %q: the shared token keeps header selection", fs.gotUserID, otherUser)
-	}
-	if code, _ := authAttempt(t, srv, "secret", devicePeer, map[string]string{"X-User-ID": "nope"}); code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a malformed X-User-ID", code)
-	}
-	if n := fr.calls.Load(); n != 0 {
-		t.Fatalf("resolver called %d times for the shared token, want 0", n)
-	}
-	if n := srv.authFailures.size(); n != 0 {
-		t.Fatalf("limiter tracks %d addresses, want 0", n)
+	if fs.gotUserID != "" {
+		t.Fatal("an unknown credential selected a member")
 	}
 }
 
 func TestDeviceTokenIsBoundToItsUser(t *testing.T) {
 	fs := &fakeStore{}
-	srv, _ := newDeviceTestServer(fs, true)
+	srv, _ := newDeviceTestServer(fs)
 
 	// Header absent: the token's user, not the default one.
 	if code, _ := authAttempt(t, srv, activeTok, devicePeer, nil); code != http.StatusOK {
@@ -132,7 +118,7 @@ func TestUnknownAndRevokedDeviceTokensAreCharged(t *testing.T) {
 	for name, token := range cases {
 		t.Run(name, func(t *testing.T) {
 			fs := &fakeStore{}
-			srv, _ := newDeviceTestServer(fs, true)
+			srv, _ := newDeviceTestServer(fs)
 			if code, _ := authAttempt(t, srv, token, devicePeer, nil); code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", code)
 			}
@@ -150,7 +136,7 @@ func TestUnknownAndRevokedDeviceTokensAreCharged(t *testing.T) {
 // look like an outage, and it must not spend the phone's failure budget.
 func TestResolverErrorIs503AndNotCharged(t *testing.T) {
 	fs := &fakeStore{}
-	srv, fr := newDeviceTestServer(fs, true)
+	srv, fr := newDeviceTestServer(fs)
 	fr.err = errors.New("connection refused")
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
@@ -167,15 +153,14 @@ func TestResolverErrorIs503AndNotCharged(t *testing.T) {
 	if n := srv.authFailures.size(); n != 0 {
 		t.Fatalf("limiter tracks %d addresses after a lookup failure, want 0", n)
 	}
-	// The shared token never needs the database, so it still works.
-	if code, _ := authAttempt(t, srv, "secret", devicePeer, nil); code != http.StatusOK {
-		t.Fatalf("shared token during an outage: status = %d, want 200", code)
+	if code, _ := authAttempt(t, srv, "secret", devicePeer, nil); code != http.StatusServiceUnavailable {
+		t.Fatalf("unknown credential during an outage: status = %d, want 503", code)
 	}
 }
 
-func TestSharedTokenCanBeDisabled(t *testing.T) {
+func TestUnknownUploadCredentialIsRefused(t *testing.T) {
 	fs := &fakeStore{}
-	srv, _ := newDeviceTestServer(fs, false)
+	srv, _ := newDeviceTestServer(fs)
 	if code, _ := authAttempt(t, srv, "secret", devicePeer, nil); code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401: the shared value is no longer a credential", code)
 	}
@@ -185,20 +170,16 @@ func TestSharedTokenCanBeDisabled(t *testing.T) {
 	if code, _ := authAttempt(t, srv, activeTok, deviceOther, nil); code != http.StatusOK {
 		t.Fatalf("device token: status = %d, want 200", code)
 	}
-	// An empty shared token is disabled whatever the flag says.
-	empty := newServer(fs, newFakeResolver(), "", true, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
-	if empty.allowShared {
-		t.Fatal("an empty PULS_TOKEN must not be an accepted credential")
-	}
+	empty := newServer(fs, newFakeResolver(), false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	if code, _ := authAttempt(t, empty, "", deviceOther, nil); code != http.StatusUnauthorized {
-		t.Fatalf("empty bearer against an empty shared token: status = %d, want 401", code)
+		t.Fatalf("empty bearer status = %d, want 401", code)
 	}
 }
 
 // Refusal happens before any comparison — including the database lookup.
 func TestThrottledIPNeverReachesTheResolver(t *testing.T) {
 	fs := &fakeStore{}
-	srv, fr := newDeviceTestServer(fs, true)
+	srv, fr := newDeviceTestServer(fs)
 	// Exhaust the budget with missing bearers, which never consult the resolver.
 	for range authFailureBurst {
 		authAttempt(t, srv, "", devicePeer, nil)
@@ -216,7 +197,7 @@ func TestThrottledIPNeverReachesTheResolver(t *testing.T) {
 
 func TestBatchRecordsTheDeviceToken(t *testing.T) {
 	fs := &fakeStore{}
-	srv, _ := newDeviceTestServer(fs, true)
+	srv, _ := newDeviceTestServer(fs)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(ndjson(t, 0, 0)))
 	req.Header.Set("Authorization", "Bearer "+activeTok)
@@ -232,17 +213,13 @@ func TestBatchRecordsTheDeviceToken(t *testing.T) {
 		t.Fatalf("batch user/token = %q/%d, want %q/7", fs.gotBatch.Header.UserID, fs.gotBatch.Header.DeviceTokenID, deviceUser)
 	}
 
-	// The shared token leaves the column NULL.
 	fs.gotBatch = nil
 	req = httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(ndjson(t, 0, 0)))
 	req.Header.Set("Authorization", "Bearer secret")
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || fs.gotBatch == nil {
-		t.Fatalf("shared token batch: status = %d", rec.Code)
-	}
-	if fs.gotBatch.Header.DeviceTokenID != 0 || fs.gotBatch.Header.UserID != defaultUserID {
-		t.Fatalf("shared token batch user/token = %q/%d", fs.gotBatch.Header.UserID, fs.gotBatch.Header.DeviceTokenID)
+	if rec.Code != http.StatusUnauthorized || fs.gotBatch != nil {
+		t.Fatalf("retired shared batch status = %d, want 401 without insertion", rec.Code)
 	}
 }
 
@@ -250,7 +227,7 @@ func TestBatchRecordsTheDeviceToken(t *testing.T) {
 // middleware writes the durable rejection row itself, after the response.
 func TestBatchUserMismatchIsRecordedAsRejection(t *testing.T) {
 	fs := &fakeStore{}
-	srv, _ := newDeviceTestServer(fs, true)
+	srv, _ := newDeviceTestServer(fs)
 	rec := httptest.NewRecorder()
 	fs.onRejection = func() {
 		if rec.Code != http.StatusForbidden {
@@ -283,10 +260,9 @@ func TestBatchUserMismatchIsRecordedAsRejection(t *testing.T) {
 	}
 }
 
-// Without a resolver (a server constructed with nil, as the handler tests
-// do) a non-shared value is simply unauthorized.
-func TestNoResolverMeansSharedOnly(t *testing.T) {
-	srv := newTestServer(&fakeStore{})
+// An absent resolver never supplies an implicit credential.
+func TestNoResolverFailsClosed(t *testing.T) {
+	srv := newServer(&fakeStore{}, nil, false, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	if code, _ := authAttempt(t, srv, activeTok, devicePeer, nil); code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", code)
 	}

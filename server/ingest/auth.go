@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,31 +10,18 @@ import (
 	"time"
 )
 
-// Authentication (SRV-7 rate limiting, SRV-8 per-device tokens).
-//
-// Every /v1 route accepts two kinds of bearer value, checked in this order:
-//
-//  1. The shared PULS_TOKEN, compared in constant time and in memory. Nothing
-//     is looked up, so a phone on the shared token never touches the database
-//     to authenticate. Off when PULS_ALLOW_SHARED_TOKEN=false or the variable
-//     is empty.
-//  2. A per-device token: the presented value is SHA-256'd and looked up in
-//     device_tokens (one indexed probe, which also stamps last_seen_at). An
-//     active row yields a principal bound to that row's user.
-//
-// The failure limiter (ratelimit.go) is consulted before either comparison,
-// and only things that mean "wrong credential" charge it: a missing bearer,
-// a value that matches nothing, a revoked token. A database error during the
-// lookup is a 503, not a 401, and is not charged — the app retries 5xx and
-// treats 401 as terminal, so answering an outage with 401 would tell the
-// user their token is wrong and stall syncing until they retyped it.
-//
-// A device principal also settles X-User-ID before any handler runs: the
-// header may be absent (the token's user is used) or equal to the token's
-// user; any other value is 403, uncharged, because it is a configuration
-// mistake on a phone that holds a valid credential, not a guess. The shared
-// token keeps exactly the old semantics — the header is unauthenticated
-// tenant selection, which is the hole device tokens exist to close.
+// Every health request needs a current device credential bound to its member.
+// A client header may confirm that member, never select another one.
+// Database failure is 503; an unknown or revoked credential is 401.
+
+func validateIngestAuthConfig(getenv func(string) string) error {
+	for _, name := range []string{"PULS_TOKEN", "PULS_ALLOW_SHARED_TOKEN", "PULS_USER_ID"} {
+		if getenv(name) != "" {
+			return errors.New(name + " is retired; use member-bound device credentials")
+		}
+	}
+	return nil
+}
 
 // tokenResolveTimeout bounds the device-token lookup. A lookup that takes
 // longer than this is a database in trouble, and the request should fail as
@@ -47,14 +33,11 @@ const tokenResolveTimeout = 2 * time.Second
 type principal struct {
 	sourceConnectionID string
 	sourceActive       bool
-	// userID is the user every row of this request belongs to: the token's
-	// user for a device token, else the X-User-ID header or the default.
+	// userID is the member bound to the verified device credential.
 	userID string
-	// tokenID and tokenPrefix identify the device_tokens row; zero/empty
-	// for the shared token.
+	// tokenID and tokenPrefix identify the verified device_tokens row.
 	tokenID     int64
 	tokenPrefix string
-	shared      bool
 }
 
 // tokenResolver is the one Store method the middleware needs, kept apart
@@ -134,7 +117,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			}
 			return
 		}
-		if !p.shared && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/routes") {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/routes") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "device credential is limited to synchronization"})
 			return
 		}
@@ -142,16 +125,11 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// authenticate turns the Authorization header into a principal: the shared
-// token first (in memory), then a device-token lookup.
+// authenticate resolves the current member-bound device credential.
 func (s *Server) authenticate(ctx context.Context, header string) (principal, *authRejection) {
 	got, ok := strings.CutPrefix(header, "Bearer ")
 	if !ok || got == "" {
 		return principal{}, rejectUnauthorized
-	}
-	if s.allowShared && s.sharedToken != "" &&
-		subtle.ConstantTimeCompare([]byte(got), []byte(s.sharedToken)) == 1 {
-		return principal{shared: true}, nil
 	}
 	if s.tokens == nil {
 		return principal{}, rejectUnauthorized
@@ -165,26 +143,18 @@ func (s *Server) authenticate(ctx context.Context, header string) (principal, *a
 	case err != nil:
 		s.log.Error("device token lookup failed", "err", err.Error())
 		return principal{}, rejectUnavailable
-	case !d.active():
+	case !d.active() || d.ID <= 0 || !isUUID(d.UserID):
 		s.log.Warn("revoked device token presented", "token_id", d.ID, "token_prefix", d.TokenPrefix)
 		return principal{}, rejectUnauthorized
 	}
 	return principal{userID: d.UserID, tokenID: d.ID, tokenPrefix: d.TokenPrefix, sourceConnectionID: d.SourceConnectionID, sourceActive: d.SourceActive}, nil
 }
 
-// resolveUser settles which user the request acts as. The shared token keeps
-// the old contract (header or default, malformed is 400); a device token is
-// bound to one user, and a header naming a different one is refused.
+// resolveUser accepts only the credential owner, with an optional matching header.
 func (s *Server) resolveUser(p principal, r *http.Request) (string, *authRejection) {
 	header := r.Header.Get("X-User-ID")
 	if header != "" && !isUUID(header) {
 		return "", &authRejection{status: http.StatusBadRequest, body: "X-User-ID is not a UUID"}
-	}
-	if p.shared {
-		if header == "" {
-			return defaultUserID, nil
-		}
-		return header, nil
 	}
 	if header == "" || strings.EqualFold(header, p.userID) {
 		return p.userID, nil
@@ -196,8 +166,8 @@ func (s *Server) resolveUser(p principal, r *http.Request) (string, *authRejecti
 }
 
 // readUserID is what every handler asks for the request's user: the one the
-// auth middleware settled from the credential (and, for the shared token,
-// X-User-ID). Every /v1 route is wrapped in auth (see routes). A handler
+// auth middleware settled from the credential. Every /v1 route is wrapped
+// in auth (see routes). A handler
 // reached without it answers 500 and serves nothing: reading X-User-ID here
 // instead, as this once did, would be unauthenticated tenant selection on
 // any route someone forgot to wrap.
@@ -220,9 +190,6 @@ func readRecordScope(w http.ResponseWriter, r *http.Request) (recordScope, bool)
 		return recordScope{}, false
 	}
 	p, _ := principalFrom(r.Context())
-	if p.shared {
-		return recordScope{userID: userID}, true
-	}
 	if p.sourceConnectionID == "" || !p.sourceActive {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "source connection requires verified pairing"})
 		return recordScope{}, false
@@ -232,10 +199,6 @@ func readRecordScope(w http.ResponseWriter, r *http.Request) (recordScope, bool)
 
 // logAuthMode is the startup line that says which credentials this server
 // accepts, next to the rate-limit line.
-func logAuthMode(log *slog.Logger, allowShared bool) {
-	mode := "device tokens only"
-	if allowShared {
-		mode = "shared PULS_TOKEN + device tokens"
-	}
-	log.Info("auth mode", "mode", mode, "shared_token", allowShared)
+func logAuthMode(log *slog.Logger) {
+	log.Info("auth mode", "mode", "device tokens only")
 }

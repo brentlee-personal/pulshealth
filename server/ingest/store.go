@@ -18,11 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// defaultUserID is the seeded default user (see db/migrations/000_users.sql). Batches
-// that arrive without an X-User-ID header are attributed to it, and it is the
-// column DEFAULT on every data table.
-const defaultUserID = "5ea4d000-0000-4000-8000-000000000001"
-
 // Store wraps the pgx pool with batch-ingest logic.
 type Store struct {
 	pool *pgxpool.Pool
@@ -166,6 +161,9 @@ var errSourceBinding = errors.New("source connection requires verified pairing")
 // idempotent transaction, so it is simply run again after a short jittered
 // pause. Bounded by the handler's insert deadline via ctx.
 func (st *Store) InsertBatch(ctx context.Context, b *Batch, bodyBytes int64) (IngestResult, error) {
+	if b == nil || !isUUID(b.Header.UserID) {
+		return IngestResult{}, errors.New("authenticated batch member is required")
+	}
 	if b.Header.DeviceTokenID != 0 && !b.familyValidated {
 		return IngestResult{}, parseErrf("personal batch requires family protocol validation")
 	}
@@ -221,9 +219,6 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 	var generation int64
 	var sourceConnectionID *string
 	var credentialID string
-	if userID == "" {
-		userID = defaultUserID
-	}
 	if b.Header.DeviceTokenID != 0 {
 		// Prevent account deletion during authenticated writes without serializing
 		// concurrent uploads or ordinary profile updates. Never create
@@ -235,7 +230,7 @@ func (st *Store) insertBatchOnce(ctx context.Context, b *Batch, bodyBytes int64)
 		}
 		generation, credentialID, sourceConnectionID = writer.generation, writer.credentialID, &writer.sourceID
 	} else if err := ensureUser(ctx, tx, userID); err != nil {
-		// Self-hosted shared tokens retain their legacy create-on-first-upload behavior.
+		// Explicit import calls name their member before writing.
 		return res, fmt.Errorf("ensure user: %w", err)
 	}
 	cached, err := reserveBatchReceipt(ctx, tx, b, userID, generation)
