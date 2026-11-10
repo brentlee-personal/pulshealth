@@ -1,3 +1,4 @@
+import { secretFixture } from "./secretFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryMock = vi.hoisted(() => vi.fn());
@@ -10,11 +11,13 @@ vi.mock("./db", () => ({
   scoped: (_userId: string, fn: (q: typeof queryMock) => Promise<unknown>) => fn(queryMock),
 }));
 
+const databaseSecret = secretFixture({ DATABASE_URL: "postgres://test" });
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const STEPS = "HKQuantityTypeIdentifierStepCount";
 beforeEach(() => {
   vi.resetModules();
-  process.env.DATABASE_URL = "postgres://test";
+  delete process.env.DATABASE_URL;
+  Object.assign(process.env, databaseSecret);
   process.env.PULS_TIME_ZONE = "UTC";
   calendar.mockReset().mockResolvedValue("Europe/Berlin");
   queryMock.mockReset();

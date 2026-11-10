@@ -14,7 +14,7 @@ const SRC_TTL = 30_000;
 const ERROR_TTL = 1000;
 
 export async function getDataSource(): Promise<DataSourceInfo> {
-  if (!process.env.DATABASE_URL) {
+  if (!process.env.DATABASE_URL_FILE) {
     return { source: "error", detail: "Personal storage is not configured" };
   }
   if (srcCache && Date.now() - srcCache.at < (srcCache.info.source === "live" ? SRC_TTL : ERROR_TTL)) return srcCache.info;
@@ -42,9 +42,9 @@ async function checkDataSource(): Promise<DataSourceInfo> {
       return { source: "error", detail: "Personal storage is unavailable" };
     }
     info = { source: "live", detail: "Connected to TimescaleDB" };
-  } catch (e) {
+  } catch {
     info = { source: "error", detail: "Database unreachable" };
-    console.error("[queries] database unreachable:", e);
+    console.error("[queries] database unreachable");
   }
   return info;
 }
@@ -57,8 +57,8 @@ async function checkDataSource(): Promise<DataSourceInfo> {
 // A failure confined to one query (a statement timeout on one person's All
 // Time chart) passes the probe, so it does not blank the viewer for
 // everyone — only the page that hit it, through liveRead's throw.
-export function readFailed(what: string, e: unknown): void {
-  console.error(`[queries] ${what} failed:`, e);
+export function readFailed(what: string): void {
+  console.error(`[queries] ${what} failed`);
   srcCache = null;
 }
 
@@ -70,7 +70,7 @@ export async function liveRead<T>(what: string, read: () => Promise<T>): Promise
     return await read();
   } catch (e) {
     if (e instanceof DataUnavailableError) throw e;
-    readFailed(what, e);
+    readFailed(what);
     throw new DataUnavailableError("A read failed; the database may be unreachable or the query timed out");
   }
 }

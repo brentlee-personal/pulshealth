@@ -20,10 +20,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { configuredTimeZone } from "./config";
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 // In CI the job sets both; a missing one there must fail, not skip quietly
 // (PULS_CI_REQUIRE_INTEGRATION / PULS_WEB_INTEGRATION, lib/integrationEnv.ts).
 const { webUrl: WEB_URL, adminUrl: ADMIN_URL } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: WEB_URL });
 
 const A = randomUUID();
 const B = randomUUID();
@@ -348,7 +350,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("web_app role (integration)", () => {
     let queries: Queries;
 
     beforeAll(async () => {
-      process.env.DATABASE_URL = WEB_URL;
+      delete process.env.DATABASE_URL;
+      Object.assign(process.env, databaseSecret);
       queries = await import("./queries");
       expect((await queries.getDataSource()).source).toBe("live");
     });

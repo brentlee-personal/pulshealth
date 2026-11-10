@@ -1,6 +1,9 @@
+import { secretFixture } from "./secretFixture";
 import { describe, expect, it, vi } from "vitest";
 
 import { amzDates, cleanSubject, mailConfig, redactAddresses, sendMail, signV4 } from "./email";
+
+const mailSecret = secretFixture({ WEB_SES_ACCESS_KEY_ID: "a", WEB_SES_SECRET_ACCESS_KEY: "b" });
 
 describe("signV4", () => {
   it("matches AWS's get-vanilla test vector", () => {
@@ -34,8 +37,8 @@ describe("sendMail", () => {
 
   it("is off unless the three settings are there", () => {
     expect(mailConfig({})).toBeNull();
-    expect(mailConfig({ WEB_SES_ACCESS_KEY_ID: "a", WEB_SES_SECRET_ACCESS_KEY: "b" })).toBeNull();
-    expect(mailConfig({ WEB_SES_ACCESS_KEY_ID: "a", WEB_SES_SECRET_ACCESS_KEY: "b", WEB_MAIL_FROM: "x@y.z", WEB_ADMIN_EMAIL: "o@y.z" }))
+    expect(mailConfig(mailSecret)).toBeNull();
+    expect(mailConfig({ ...mailSecret, WEB_MAIL_FROM: "x@y.z", WEB_ADMIN_EMAIL: "o@y.z" }))
       .toEqual({ region: "us-east-1", accessKeyId: "a", secretAccessKey: "b", from: "x@y.z", admin: "o@y.z" });
   });
 

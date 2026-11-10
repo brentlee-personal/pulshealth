@@ -21,10 +21,12 @@ import { Client, DatabaseError } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 // In CI the job sets both; a missing one there must fail, not skip quietly
 // (PULS_CI_REQUIRE_INTEGRATION / PULS_WEB_INTEGRATION, lib/integrationEnv.ts).
 const { webUrl: WEB_URL, adminUrl: ADMIN_URL } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: WEB_URL });
 
 const ADMIN_USER = randomUUID();
 const tag = ADMIN_USER.slice(0, 8);
@@ -79,7 +81,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     process.env.WEB_ACCOUNTS = "true";
     process.env.WEB_SIGNUPS = "true";
     process.env.TRUST_PROXY_HEADERS = "true";
-    process.env.DATABASE_URL = WEB_URL;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     admin = new Client({ connectionString: ADMIN_URL });
     await admin.connect();
     const { hashPassword } = await import("./accounts/password");

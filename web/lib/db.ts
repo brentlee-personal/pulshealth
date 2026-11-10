@@ -1,6 +1,7 @@
 // Thin Postgres access. Server-only — never import from a client component.
 import { Pool, type PoolClient, type QueryConfig } from "pg";
 import { isUuid } from "./uuid";
+import { readSecret } from "../scripts/secrets.mjs";
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -23,11 +24,12 @@ export function poolSize(value: string | undefined = process.env.WEB_DB_POOL_SIZ
 }
 
 export function getPool(): Pool | null {
-  if (!process.env.DATABASE_URL) return null;
+  const connectionString = readSecret("DATABASE_URL");
+  if (!connectionString) return null;
   if (!initialized) {
     initialized = true;
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
       max: poolSize(),
       // Expanded Timescale/calendar views can generate thousands of JIT
       // functions. Compilation alone exceeded the request timeout in production;
@@ -48,10 +50,11 @@ export function getPool(): Pool | null {
 
 /** A reserved connection: chart saturation must not turn liveness red. */
 export function getHealthPool(): Pool | null {
-  if (!process.env.DATABASE_URL) return null;
+  const connectionString = readSecret("DATABASE_URL");
+  if (!connectionString) return null;
   if (!healthPool) {
     healthPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
       max: 1,
       options: "-c jit=off",
       connectionTimeoutMillis: 4000,

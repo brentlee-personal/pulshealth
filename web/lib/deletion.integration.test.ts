@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { Client } from "pg";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 const { webUrl, adminUrl } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: webUrl });
 describe.skipIf(!webUrl || !adminUrl)("automatic deletion (integration)", () => {
   let admin: Client;
   let directory: string;
@@ -18,7 +20,8 @@ describe.skipIf(!webUrl || !adminUrl)("automatic deletion (integration)", () => 
 
   beforeAll(async () => {
     process.env.WEB_ACCOUNTS = "true";
-    process.env.DATABASE_URL = webUrl;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     directory = await mkdtemp(join(tmpdir(), "puls-erasure-integration-"));
     process.env.PULS_DELETION_LEDGER_DIR = directory;
     admin = new Client({ connectionString: adminUrl });

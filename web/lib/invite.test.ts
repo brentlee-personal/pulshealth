@@ -1,8 +1,10 @@
+import { secretFixture } from "./secretFixture";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { inviteMessage, newInviteToken, normalizeEmail, parseArgs, sesSend } from "../scripts/invite.mjs";
 
+const mailSecret = secretFixture({ WEB_SES_ACCESS_KEY_ID: "AKID", WEB_SES_SECRET_ACCESS_KEY: "secret" });
 const USER = "11111111-1111-4111-8111-111111111111";
 
 describe("scripts/invite.mjs", () => {
@@ -55,7 +57,7 @@ describe("scripts/invite.mjs", () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const now = new Date("2026-10-02T20:00:00Z");
-    const env = { WEB_SES_ACCESS_KEY_ID: "AKID", WEB_SES_SECRET_ACCESS_KEY: "secret", WEB_MAIL_FROM: "x@example.com" };
+    const env = { ...mailSecret, WEB_MAIL_FROM: "x@example.com" };
     await sesSend({ to: "a@example.com", subject: "S", text: "T" }, env, now);
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const expected = signV4({

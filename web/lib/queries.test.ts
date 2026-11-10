@@ -1,3 +1,4 @@
+import { secretFixture } from "./secretFixture";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,10 +35,12 @@ vi.mock("./db", () => ({
 
 // Passed to every query explicitly: the user is an argument, never read from
 // the environment or a cookie inside lib/queries.ts.
+const databaseSecret = secretFixture({ DATABASE_URL: "postgres://test" });
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 
 beforeAll(() => {
-  process.env.DATABASE_URL = "postgres://test";
+  delete process.env.DATABASE_URL;
+  Object.assign(process.env, databaseSecret);
   process.env.PULS_TIME_ZONE = "America/Los_Angeles";
 });
 
@@ -474,7 +477,7 @@ describe("with no live database", () => {
 
   async function withoutDatabase(nodeEnv: string, fn: (x: Queries) => Promise<void>) {
     vi.stubEnv("NODE_ENV", nodeEnv);
-    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("DATABASE_URL_FILE", "");
     vi.resetModules();
     try {
       await fn(await import("./queries"));

@@ -19,11 +19,12 @@
 // viewer uses) and not printed at all. It works once and expires after
 // --hours (48 by default). The base URL comes from --url, else WEB_PUBLIC_URL.
 //
-// Connects with the container's DATABASE_URL — in accounts mode, the web_app
+// Connects with the container's DATABASE_URL_FILE as the restricted web_app
 // role, which may call the fixed new-member function, not write health tables.
 
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { readSecret } from "./secrets.mjs";
 
 export const USAGE =
   "usage: node scripts/invite.mjs --email <address> [--admin] [--url https://<viewer host>] [--hours 48] [--send]";
@@ -94,8 +95,8 @@ export function newInviteToken() {
  * @param {Date} [now]
  */
 export async function sesSend({ to, subject, text }, env = process.env, now = new Date()) {
-  const id = env.WEB_SES_ACCESS_KEY_ID, secret = env.WEB_SES_SECRET_ACCESS_KEY, from = env.WEB_MAIL_FROM;
-  if (!id || !secret || !from) throw new Error("email is not set up (WEB_SES_ACCESS_KEY_ID, WEB_SES_SECRET_ACCESS_KEY, WEB_MAIL_FROM)");
+  const id = readSecret("WEB_SES_ACCESS_KEY_ID", env), secret = readSecret("WEB_SES_SECRET_ACCESS_KEY", env), from = env.WEB_MAIL_FROM;
+  if (!id || !secret || !from) throw new Error("email is not set up (WEB_SES_ACCESS_KEY_ID_FILE, WEB_SES_SECRET_ACCESS_KEY_FILE, WEB_MAIL_FROM)");
   const region = env.WEB_SES_REGION || "us-east-1";
   const host = `email.${region}.amazonaws.com`, path = "/v2/email/outbound-emails";
   const body = JSON.stringify({
@@ -121,7 +122,7 @@ export async function sesSend({ to, subject, text }, env = process.env, now = ne
     body,
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) throw new Error(`SES answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`SES answered ${res.status}`);
 }
 
 export function inviteMessage({ link, expires }) {
@@ -149,13 +150,14 @@ async function main() {
     return 2;
   }
   const { email, admin, url, hours, send } = parsed.options;
-  if (!process.env.DATABASE_URL) {
-    console.error("invite: DATABASE_URL is not set (run this inside the web container: docker compose exec web …)");
+  const connectionString = readSecret("DATABASE_URL");
+  if (!connectionString) {
+    console.error("invite: DATABASE_URL_FILE is not set (run this inside the web container: docker compose exec web …)");
     return 1;
   }
 
   const { default: pg } = await import("pg");
-  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  const client = new pg.Client({ connectionString });
   await client.connect();
   try {
     const { token, hash } = newInviteToken();
@@ -206,8 +208,8 @@ async function main() {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().then(
     (code) => process.exit(code),
-    (e) => {
-      console.error("invite: failed:", e instanceof Error ? e.message : e);
+    () => {
+      console.error("invite: request failed; check the protected credential files and database");
       process.exit(1);
     },
   );

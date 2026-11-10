@@ -1,5 +1,7 @@
+import { secretFixture } from "../secretFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const databaseSecret = secretFixture({ DATABASE_URL: "postgres://synthetic" });
 const probe = vi.hoisted(() => vi.fn());
 vi.mock("../db", () => ({ healthQuery: probe }));
 
@@ -7,7 +9,7 @@ describe("personal storage readiness", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.resetModules();
-    vi.stubEnv("DATABASE_URL", "postgres://synthetic");
+    vi.stubEnv("DATABASE_URL_FILE", databaseSecret.DATABASE_URL_FILE);
     probe.mockReset();
   });
 
@@ -31,7 +33,7 @@ describe("personal storage readiness", () => {
 
   it.each(["development", "production"])("never invents health values in %s", async (environment) => {
     vi.stubEnv("NODE_ENV", environment);
-    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("DATABASE_URL_FILE", "");
     const { liveRead } = await import("./source");
     const read = vi.fn();
     await expect(liveRead("synthetic", read)).rejects.toThrow(/not configured/);

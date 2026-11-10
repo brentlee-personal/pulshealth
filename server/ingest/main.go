@@ -117,9 +117,9 @@ func run(logger *slog.Logger) error {
 	if err := validateIngestAuthConfig(os.Getenv); err != nil {
 		return err
 	}
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return errors.New("DATABASE_URL must be set")
+	dbURL, err := readDatabaseURL(os.Getenv)
+	if err != nil {
+		return err
 	}
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
@@ -219,7 +219,7 @@ func maxInflightBatches(raw string) int {
 func connectWithRetry(ctx context.Context, url string, logger *slog.Logger) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+		return nil, errors.New("invalid database configuration")
 	}
 	deadline := time.Now().Add(60 * time.Second)
 	for {
@@ -231,9 +231,9 @@ func connectWithRetry(ctx context.Context, url string, logger *slog.Logger) (*pg
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			pool.Close()
-			return nil, fmt.Errorf("database unreachable: %w", err)
+			return nil, errors.New("database unavailable")
 		}
-		logger.Warn("waiting for database", "err", err.Error())
+		logger.Warn("waiting for database")
 		select {
 		case <-time.After(2 * time.Second):
 		case <-ctx.Done():

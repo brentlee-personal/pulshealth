@@ -1,10 +1,10 @@
+import { secretFixture } from "../secretFixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DailyCap, approvalMessage, newRequestNotice, publicBase, sendApproval } from "./mail";
 
 const MAIL_ENV = {
-  WEB_SES_ACCESS_KEY_ID: "AKID",
-  WEB_SES_SECRET_ACCESS_KEY: "secret",
+  ...secretFixture({ WEB_SES_ACCESS_KEY_ID: "AKID", WEB_SES_SECRET_ACCESS_KEY: "secret" }),
   WEB_MAIL_FROM: "noreply@example.com",
   WEB_ADMIN_EMAIL: "operator@example.com",
 };

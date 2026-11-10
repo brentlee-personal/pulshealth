@@ -2,6 +2,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { parseFlag, viewerMode } = await import("./lib/mode");
   viewerMode();
+  const { readSecret } = await import("./scripts/secrets.mjs");
+  readSecret("DATABASE_URL");
   const trustProxy = parseFlag("TRUST_PROXY_HEADERS", process.env.TRUST_PROXY_HEADERS);
   const { clientIpHeaderWarning } = await import("./lib/accounts/request");
   const warning = clientIpHeaderWarning(trustProxy);

@@ -14,10 +14,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { newInviteToken } from "../scripts/invite.mjs";
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 // In CI the job sets both; a missing one there must fail, not skip quietly
 // (PULS_CI_REQUIRE_INTEGRATION / PULS_WEB_INTEGRATION, lib/integrationEnv.ts).
 const { webUrl: WEB_URL, adminUrl: ADMIN_URL } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: WEB_URL });
 
 const A = randomUUID();
 const B = randomUUID();
@@ -76,7 +78,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
   beforeAll(async () => {
     process.env.WEB_ACCOUNTS = "true";
     process.env.TRUST_PROXY_HEADERS = "true";
-    process.env.DATABASE_URL = WEB_URL;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
 
     admin = new Client({ connectionString: ADMIN_URL });
     await admin.connect();

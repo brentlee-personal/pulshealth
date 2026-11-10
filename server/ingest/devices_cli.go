@@ -19,7 +19,7 @@ import (
 //	docker compose run --rm --no-deps ingest devices <subcommand>
 //
 // (`make devices ARGS='…'` from the repository root), reusing the container's
-// DATABASE_URL. Plain text on stdout, errors on stderr, exit 2 on a usage
+// DATABASE_URL_FILE. Pairing text on stdout, errors on stderr, exit 2 on a usage
 // error and 1 on anything else.
 //
 // `issue` also prints the pairing code for the token it just minted (qr.go,
@@ -162,9 +162,9 @@ func runDevicesCLI(args []string, stdout, stderr io.Writer) int {
 			cmd.url = normalized
 		}
 	}
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		fmt.Fprintln(stderr, "ingest devices: DATABASE_URL must be set")
+	dbURL, err := readDatabaseURL(os.Getenv)
+	if err != nil {
+		fmt.Fprintln(stderr, "ingest devices:", err)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

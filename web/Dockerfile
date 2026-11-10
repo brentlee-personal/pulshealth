@@ -38,7 +38,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # The personal-account operator commands (`make web-invite`, `make web-keys`);
 # they import pg, which the standalone bundle already carries for the server.
-COPY --from=builder --chown=nextjs:nodejs /app/scripts/invite.mjs /app/scripts/auth-keys.mjs ./scripts/
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/invite.mjs /app/scripts/auth-keys.mjs /app/scripts/secrets.mjs ./scripts/
 USER nextjs
 EXPOSE 3000
 CMD ["node", "server.js"]

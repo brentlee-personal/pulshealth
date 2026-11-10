@@ -9,8 +9,10 @@ import { issueAccessToken, type APIPrincipal } from "./oauth/jwt";
 import { type ReadPermissions } from "./oauth/permissions";
 import { createSession, findSession, newToken, tokenHash } from "./accounts/session";
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 const databases = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: databases.webUrl });
 const apiUrl = process.env.API_DATABASE_URL;
 if (databases.available && !apiUrl) throw new Error("API_DATABASE_URL is required for personal API credential tests");
 const keys = oauthKeyFixture();
@@ -53,7 +55,8 @@ describe.skipIf(!databases.available || !apiUrl)("personal API credential author
   const resolve = (token: string) => reader.query<Resolved>("SELECT * FROM auth.resolve_api_credential($1)", [tokenHash(token)]).then((r) => r.rows);
 
   beforeAll(async () => {
-    process.env.DATABASE_URL = databases.webUrl;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     process.env.WEB_ACCOUNTS = "true";
     admin = new Client({ connectionString: databases.adminUrl });
     reader = new Client({ connectionString: apiUrl });

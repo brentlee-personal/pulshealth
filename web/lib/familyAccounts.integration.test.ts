@@ -5,8 +5,10 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 const { webUrl, adminUrl } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: webUrl });
 const member = randomUUID();
 const unclaimedMember = randomUUID();
 const unclaimedWorkout = randomUUID();
@@ -20,7 +22,8 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
   beforeAll(async () => {
     process.env.WEB_ACCOUNTS = "true";
     process.env.TRUST_PROXY_HEADERS = "true";
-    process.env.DATABASE_URL = webUrl;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     await admin.connect();
     await admin.query("INSERT INTO users(id) VALUES($1)", [member]);
     await admin.query("INSERT INTO users(id) VALUES($1)", [unclaimedMember]);

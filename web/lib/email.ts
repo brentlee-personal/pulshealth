@@ -3,7 +3,7 @@
 // Amazon SES v2 API with a hand-rolled AWS Signature Version 4 (node:crypto),
 // so the viewer still has no email or AWS dependency. Server-only.
 //
-// Off unless configured: WEB_SES_ACCESS_KEY_ID, WEB_SES_SECRET_ACCESS_KEY,
+// Off unless configured: WEB_SES_ACCESS_KEY_ID_FILE, WEB_SES_SECRET_ACCESS_KEY_FILE,
 // WEB_SES_REGION (default us-east-1) and WEB_MAIL_FROM, an address SES has
 // verified. WEB_ADMIN_EMAIL is where the operator's notices go. Unconfigured,
 // nothing is sent and the admin page is the only place requests show up.
@@ -12,6 +12,7 @@
 // of a decision.
 
 import { createHash, createHmac } from "node:crypto";
+import { readSecret } from "../scripts/secrets.mjs";
 
 import type { Env } from "./mode";
 
@@ -24,8 +25,8 @@ export interface MailConfig {
 }
 
 export function mailConfig(env: Env = process.env): MailConfig | null {
-  const accessKeyId = env.WEB_SES_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = env.WEB_SES_SECRET_ACCESS_KEY?.trim();
+  const accessKeyId = readSecret("WEB_SES_ACCESS_KEY_ID", env);
+  const secretAccessKey = readSecret("WEB_SES_SECRET_ACCESS_KEY", env);
   const from = env.WEB_MAIL_FROM?.trim();
   if (!accessKeyId || !secretAccessKey || !from) return null;
   return {
@@ -148,12 +149,12 @@ export async function sendMail(mail: Mail, config = mailConfig(), fetchImpl: typ
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      console.error(`[puls-web] email not sent: SES answered ${res.status}: ${redactAddresses((await res.text()).slice(0, 300))}`);
+      console.error(`[puls-web] email not sent: SES answered ${res.status}`);
       return false;
     }
     return true;
-  } catch (e) {
-    console.error("[puls-web] email not sent:", redactAddresses(e instanceof Error ? e.message : String(e)));
+  } catch {
+    console.error("[puls-web] email not sent: provider unavailable");
     return false;
   }
 }

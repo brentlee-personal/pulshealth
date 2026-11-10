@@ -17,9 +17,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { issueAccessToken, signAccessToken, verifyAccessToken } from "./oauth/jwt";
 
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 
 const oauthKeys = oauthKeyFixture();
 const { webUrl: WEB_URL, adminUrl: ADMIN_URL } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: WEB_URL });
 
 const ISSUER = "https://viewer.example";
 const MCP = "https://mcp.example/mcp";
@@ -176,7 +178,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     process.env.PULS_MCP_URL = MCP;
     delete process.env.PULS_MCP_OAUTH_SECRET;
   Object.assign(process.env, oauthKeys.env);
-    process.env.DATABASE_URL = WEB_URL;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     admin = new Client({ connectionString: ADMIN_URL });
     await admin.connect();
     for (const u of [PERSON, OTHER, ADMIN]) await admin.query("INSERT INTO users (id) VALUES ($1)", [u]);

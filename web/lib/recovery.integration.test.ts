@@ -2,17 +2,20 @@ import { createHash, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { requireIntegrationDatabases } from "./integrationEnv";
+import { secretFixture } from "./secretFixture";
 import { requestPasswordReset, completePasswordReset, usablePasswordReset } from "./accounts/recovery";
 import { createSession, findSession, tokenHash } from "./accounts/session";
 import { findAccountForLogin, finishPasswordLogin } from "./accounts/store";
 const { webUrl, adminUrl } = requireIntegrationDatabases();
+const databaseSecret = secretFixture({ DATABASE_URL: webUrl });
 const user = randomUUID();
 const email = `${user}@example.com`;
 describe.skipIf(!webUrl || !adminUrl)("password recovery (integration)", () => {
   let admin: Client;
   let accountId: string;
   beforeAll(async () => {
-    process.env.DATABASE_URL = webUrl;
+    delete process.env.DATABASE_URL;
+    Object.assign(process.env, databaseSecret);
     process.env.WEB_ACCOUNTS = "true";
     admin = new Client({ connectionString: adminUrl });
     await admin.connect();

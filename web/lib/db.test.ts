@@ -1,3 +1,4 @@
+import { secretFixture } from "./secretFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // A stand-in for pg's Pool: one client whose statements are recorded, and a
@@ -35,10 +36,12 @@ vi.mock("pg", () => {
   return { Pool };
 });
 
+const databaseSecret = secretFixture({ DATABASE_URL: "postgres://test" });
 const USER = "11111111-1111-4111-8111-111111111111";
 
 beforeEach(() => {
-  process.env.DATABASE_URL = "postgres://test";
+  delete process.env.DATABASE_URL;
+  Object.assign(process.env, databaseSecret);
   fake.statements.length = 0;
   fake.released.length = 0;
   fake.failOn = null;
