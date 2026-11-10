@@ -54,8 +54,8 @@ SET search_path = pg_catalog, pg_temp
 AS $$
   SELECT public.puls_valid_permissions(child, ARRAY['metrics:read', 'samples:read', 'data:export'])
      AND public.puls_valid_read_permissions(parent)
-     AND parent->'operations' @> child->'operations'
-     AND parent->'record_types' @> child->'record_types'
+     AND (parent->'operations') @> (child->'operations')
+     AND (parent->'record_types') @> (child->'record_types')
      AND public.puls_utc_nanoseconds(child->'time_range'->>'from') >= public.puls_utc_nanoseconds(parent->'time_range'->>'from')
      AND public.puls_utc_nanoseconds(child->'time_range'->>'until') <= public.puls_utc_nanoseconds(parent->'time_range'->>'until')
 $$;
