@@ -1,104 +1,68 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryMock = vi.hoisted(() => vi.fn());
-// Fixed account calendar for these SQL-math tests, not an authorization proof.
-vi.mock("./reportingTimeZone", () => ({ reportingTimeZone: async () => process.env.PULS_TIME_ZONE || "UTC" }));
-// scoped() runs the callback's statements through the same mock; its
-// transaction and user setting are lib/db.ts's business, tested there.
+const calendar = vi.hoisted(() => vi.fn());
+vi.mock("./reportingTimeZone", () => ({ reportingTimeZone: calendar }));
+// SQL-math fixtures; actual personal view isolation is tested against PostgreSQL.
 vi.mock("./db", () => ({
   query: queryMock,
-  healthQuery: (sql: string, params?: unknown[]) => sql.includes("current_user AS role")
-    ? Promise.resolve([{ role: "web_app", direct: false }]) : queryMock(sql, params),
+  healthQuery: async () => [{ role: "web_app", direct: false }],
   scoped: (_userId: string, fn: (q: typeof queryMock) => Promise<unknown>) => fn(queryMock),
 }));
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const STEPS = "HKQuantityTypeIdentifierStepCount";
-
-let warnSpy: ReturnType<typeof vi.spyOn>;
-
-// The database-zone lookup is cached at module scope, so every test imports a
-// fresh copy of ./queries.
 beforeEach(() => {
   vi.resetModules();
   process.env.DATABASE_URL = "postgres://test";
-  process.env.PULS_TIME_ZONE = "Europe/Berlin";
+  process.env.PULS_TIME_ZONE = "UTC";
+  calendar.mockReset().mockResolvedValue("Europe/Berlin");
   queryMock.mockReset();
-  warnSpy?.mockRestore();
-  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-// metricDailyRows: what metric_daily holds for the window (a covered type).
-function mockDatabase(zoneLookup: () => Promise<unknown[]>, metricDailyRows: unknown[] = [{ identifier: STEPS, t: "0", value: 1 }]) {
-  queryMock.mockImplementation((text: string) => {
-    if (text.includes("puls_time_zone()")) return zoneLookup();
-    if (text.includes("FROM metric_daily")) return Promise.resolve(metricDailyRows);
-    return Promise.resolve([]);
-  });
+function mockDatabase(rows: unknown[] = [{ identifier: STEPS, t: "0", value: 1 }]) {
+  queryMock.mockImplementation(async (sql: string) => sql.includes("FROM metric_daily") ? rows : []);
 }
+const calls = () => queryMock.mock.calls.map(([sql]) => sql as string);
+const usedDaily = () => calls().some(sql => sql.includes("FROM metric_daily") && sql.includes("GROUP BY 1 ORDER BY 1"));
 
-const sqlCalls = () => queryMock.mock.calls.map(([sql]) => sql as string);
-const touchedMetricDaily = () => sqlCalls().some((sql) => sql.includes("metric_daily"));
-const usedMetricDailySeries = () =>
-  sqlCalls().some((sql) => sql.includes("FROM metric_daily") && sql.includes("GROUP BY 1 ORDER BY 1"));
-const usedRawBuckets = () => sqlCalls().some((sql) => sql.includes("WITH per_source"));
-const zoneLookups = () => sqlCalls().filter((sql) => sql.includes("puls_time_zone()")).length;
-
-describe("metric_daily zone guard", () => {
-  it("uses metric_daily when the database's zone equals PULS_TIME_ZONE", async () => {
-    mockDatabase(() => Promise.resolve([{ zone: "Europe/Berlin" }]));
+describe("personal reporting calendar", () => {
+  it("uses personal daily rows even when the global calendar differs", async () => {
+    mockDatabase();
     const { getSeries } = await import("./queries");
     await getSeries(USER_ID, STEPS, "Y");
-
-    expect(usedMetricDailySeries()).toBe(true);
-    expect(usedRawBuckets()).toBe(false);
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(usedDaily()).toBe(true);
+    expect(calls().some(sql => sql.includes("puls_time_zone()"))).toBe(false);
+    expect(calendar).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("reads raw samples for a type metric_daily has no rows for", async () => {
-    // Not covered (no daily sum or average series), or nothing in the window
-    // yet: the same answer raw samples give, so the chart asks them.
-    mockDatabase(() => Promise.resolve([{ zone: "Europe/Berlin" }]), []);
+  it("reads raw personal samples when the daily view has no rows", async () => {
+    mockDatabase([]);
     const { getDailySparklines, getSeries } = await import("./queries");
     await getSeries(USER_ID, STEPS, "Y");
     await getDailySparklines(USER_ID, [STEPS]);
-
-    expect(usedMetricDailySeries()).toBe(true);
-    expect(usedRawBuckets()).toBe(true);
-    expect(sqlCalls().filter((sql) => sql.includes("FROM quantity_samples"))).toHaveLength(2);
+    expect(usedDaily()).toBe(true);
+    expect(calls().filter(sql => sql.includes("FROM quantity_samples"))).toHaveLength(2);
   });
 
-  it("falls back to raw local buckets and warns once on a zone mismatch", async () => {
-    mockDatabase(() => Promise.resolve([{ zone: "UTC" }]));
-    const { getDailySparklines, getSeries } = await import("./queries");
-    await getSeries(USER_ID, STEPS, "Y");
-    await getDailySparklines(USER_ID, [STEPS]);
-
-    expect(touchedMetricDaily()).toBe(false);
-    expect(usedRawBuckets()).toBe(true);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(String(warnSpy.mock.calls[0][0])).toContain("Europe/Berlin");
-    expect(String(warnSpy.mock.calls[0][0])).toContain("UTC");
-  });
-
-  it("falls back and warns once when puls_time_zone() does not exist", async () => {
-    mockDatabase(() => Promise.reject(new Error("function puls_time_zone() does not exist")));
+  it("uses the changed account calendar on the next chart", async () => {
+    mockDatabase();
     const { getSeries } = await import("./queries");
     await getSeries(USER_ID, STEPS, "Y");
-    await getSeries(USER_ID, STEPS, "30D");
-
-    expect(touchedMetricDaily()).toBe(false);
-    expect(usedRawBuckets()).toBe(true);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
+    calendar.mockResolvedValue("Pacific/Auckland");
+    queryMock.mockClear();
+    await getSeries(USER_ID, STEPS, "Y");
+    const chart = queryMock.mock.calls.find(([sql]) => sql.includes("GROUP BY 1 ORDER BY 1"));
+    expect(chart?.[1]).toContain("Pacific/Auckland");
+    expect(chart?.[1]).not.toContain("Europe/Berlin");
   });
 
-  it("looks the database zone up once and reuses it", async () => {
-    mockDatabase(() => Promise.resolve([{ zone: "Europe/Berlin" }]));
-    const { getDailySparklines, getSeries } = await import("./queries");
-    await Promise.all([getSeries(USER_ID, STEPS, "Y"), getSeries(USER_ID, STEPS, "30D")]);
-    await getDailySparklines(USER_ID, [STEPS]);
-
-    expect(zoneLookups()).toBe(1);
-    expect(usedMetricDailySeries()).toBe(true);
+  it("refuses an unavailable personal calendar without using the global one", async () => {
+    mockDatabase();
+    calendar.mockRejectedValue(new Error("Reporting time zone unavailable"));
+    const { getSeries } = await import("./queries");
+    await expect(getSeries(USER_ID, STEPS, "Y")).rejects.toThrow(/unavailable/i);
+    expect(usedDaily()).toBe(false);
+    expect(calls().some(sql => sql.includes("puls_time_zone()"))).toBe(false);
   });
 });
