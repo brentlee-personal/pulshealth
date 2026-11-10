@@ -48,3 +48,21 @@ export function permissionsFromForm(form: FormData | null): ReadPermissions | nu
   };
   return readPermissions({ operations: form?.getAll("operation"), record_types: form?.getAll("record_type"), time_range: { from: utc("from"), until: utc("until") } });
 }
+
+export function readRequestAllowed(permissions: ReadPermissions, operation: ReadOperation, types: string[], start: number, end: number): boolean {
+  const from = instant(permissions.time_range.from), until = instant(permissions.time_range.until);
+  return from !== null && until !== null && permissions.operations.includes(operation) && types.length > 0 &&
+    types.every((type) => permissions.record_types.includes(type)) && Number.isSafeInteger(start) && Number.isSafeInteger(end) &&
+    start >= 0 && start < end && BigInt(start) * 1_000_000n >= from && BigInt(end) * 1_000_000n <= until;
+}
+
+export function defaultReadWindow(permissions: ReadPermissions, now = Date.now()): { start: number; end: number } | null {
+  const from = instant(permissions.time_range.from), until = instant(permissions.time_range.until);
+  if (from === null || until === null) return null;
+  const last = until < BigInt(now) * 1_000_000n ? until : BigInt(now) * 1_000_000n;
+  const first = last - 31n * 86_400_000_000_000n;
+  const boundedStart = from > first ? from : first;
+  const start = Number(((boundedStart > 0n ? boundedStart : 0n) + 999_999n) / 1_000_000n);
+  const end = Number(last / 1_000_000n);
+  return start < end ? { start, end } : null;
+}

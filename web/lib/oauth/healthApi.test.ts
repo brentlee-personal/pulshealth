@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.restoreAllMocks(); vi.mocked(query).mockReset();
   Object.assign(process.env, { WEB_ACCOUNTS: "true", WEB_PUBLIC_URL: issuer, PULS_MCP_URL: "https://mcp.example/mcp", ...oauthKeys.env,
     PULS_API_URL: "http://api:8081", PULS_API_TOKEN: "internal-only" });
-  vi.mocked(query).mockResolvedValue([{ id: grant, permissions, authorization_version: "1" }]);
+  vi.mocked(query).mockResolvedValue([{ id: grant, time_zone: "UTC" }]);
 });
 describe("public account-scoped health API", () => {
   it("returns 503 for unavailable keys without consulting health storage or another credential", async () => {
@@ -39,15 +39,51 @@ describe("public account-scoped health API", () => {
     }
     expect(query).not.toHaveBeenCalled();
   });
-  it("filters the user list and forces the token subject upstream", async () => {
+  it("returns only personal identity metadata without fetching household profiles", async () => {
     const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ users: [{ userID: user, timeZone: "UTC" }, { userID: other, name: "Private" }], default: other }));
     const response = await request("users");
     expect(await response.json()).toEqual({ users: [{ userID: user, timeZone: "UTC" }], default: user, multiUser: false });
-    const [url, options] = fetcher.mock.calls[0];
-    expect(String(url)).toBe(`http://api:8081/v1/users?user=${user}`);
-    expect(options).toMatchObject({ redirect: "error", cache: "no-store", headers: { Authorization: "Bearer internal-only" } });
+    expect(fetcher).not.toHaveBeenCalled();
     expect(query).toHaveBeenCalledWith(expect.stringContaining("g.authorization_version = $5 AND g.permissions = $6::jsonb"),
       [user, "pc_test", config.resource, grant, 1, JSON.stringify(permissions)]);
+  });
+  it("forwards explicit permitted types and times with the verified member", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ metrics: [] }));
+    const target = "metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=1767571200000&end=1767657600000";
+    expect((await request(target)).status).toBe(200);
+    const [url, options] = fetcher.mock.calls[0];
+    expect(String(url)).toBe(`http://api:8081/v1/${target}&user=${user}`);
+    expect(options).toMatchObject({ redirect: "error", cache: "no-store", headers: { Authorization: "Bearer internal-only" } });
+  });
+  it("never returns health counts from its permitted-type metadata list", async () => {
+    const metadata = [{ identifier: permissions.record_types[0], kind: "quantity", unit: "count" },
+      { identifier: "HKWorkoutTypeIdentifier", kind: "workout", unit: null }];
+    const fetcher = vi.spyOn(globalThis, "fetch");
+    expect(await (await request("catalog/types")).json()).toEqual({ types: metadata });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("refuses operations, types and times beyond the signed scope before touching storage", async () => {
+    const target = "metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=1767571200000&end=1767657600000";
+    const rawOnly = { ...authorization, permissions: { ...permissions, operations: ["samples:read"] } } satisfies import("./jwt").GrantAuthorization;
+    expect((await request(target, issueAccessToken(config, user, "pc_test", undefined, rawOnly).token)).status).toBe(403);
+    for (const path of [
+      target.replace("StepCount", "HeartRate"),
+      `metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=${Date.UTC(2019, 0, 1)}&end=${Date.UTC(2019, 0, 2)}`,
+      `metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=${Date.UTC(2030, 0, 1)}&end=${Date.UTC(2030, 0, 2)}`,
+      `users?user=${user}`,
+    ]) expect((await request(path)).status).toBe(403);
+    expect(query).not.toHaveBeenCalled();
+  });
+  it("bounds the default workout request by both the grant and a 31-day window", async () => {
+    const now = Date.UTC(2026, 0, 15);
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ workouts: [] }));
+    expect((await request("workouts")).status).toBe(200);
+    const url = new URL(String(fetcher.mock.calls[0][0]));
+    expect(url.searchParams.get("start")).toBe(String(now - 31 * 86400_000));
+    expect(url.searchParams.get("end")).toBe(String(now));
+    expect(url.searchParams.get("user")).toBe(user);
   });
   it("rejects cross-account, duplicated, unknown, and unbounded queries", async () => {
     for (const path of [`users?user=${other}`, `users?user=${user}&user=${user}`, "users?debug=true", "workouts?limit=500", "metrics/daily?start=1&end=9999999999999", "sleep/daily", "export", "constructor", "toString", "__proto__"]) {
@@ -69,7 +105,7 @@ describe("public account-scoped health API", () => {
   });
   it("does not leak upstream errors or the deployment token", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private internal-only", { status: 401 }));
-    const response = await request("users");
+    const response = await request("workouts");
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("internal-only");
   });
