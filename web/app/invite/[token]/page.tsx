@@ -43,20 +43,16 @@ export default async function InvitePage({ params, searchParams }: { params: Par
   if (!invite) {
     return (
       <AuthCard
-        title="This link has expired"
-        subtitle="Invite links work once and expire after 48 hours. Ask the person who sent it for a new one."
+        title="This invitation cannot be used"
+        subtitle="Invitations create new accounts. Existing members can sign in or use password recovery."
       />
     );
   }
 
   return (
     <AuthCard
-      title={invite.resetsExisting ? "Choose a new password" : "Create your account"}
-      subtitle={
-        invite.resetsExisting
-          ? "This link resets the password of your existing account and signs it out everywhere."
-          : "You have been invited to view your own health records here."
-      }
+      title="Create your account"
+      subtitle="You have been invited to view your own health records here."
       error={errorMessage(param(search.error), { invalid: "This invite link has expired or was already used." })}
     >
       <form method="post" action="/api/auth/invite">
@@ -83,7 +79,7 @@ export default async function InvitePage({ params, searchParams }: { params: Par
           <input id="confirm" name="confirm" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} required />
         </div>
         <button type="submit" className="btn btn-primary btn-block" style={{ marginTop: 6 }}>
-          {invite.resetsExisting ? "Set password and sign in" : "Create account"}
+          Create account
         </button>
       </form>
     </AuthCard>

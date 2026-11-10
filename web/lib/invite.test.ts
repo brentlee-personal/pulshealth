@@ -45,9 +45,9 @@ describe("scripts/invite.mjs", () => {
   it("emails the link only with a full viewer address to put in it", () => {
     expect(parseArgs(["--user", USER, "--email", "a@example.com", "--send"], {}).error).toMatch(/--send needs/);
     expect(parseArgs(["--user", USER, "--email", "a@example.com", "--send"], { WEB_PUBLIC_URL: "https://viewer.example" }).options?.send).toBe(true);
-    const m = inviteMessage({ link: "https://viewer.example/invite/abc", expires: new Date("2026-10-04T00:00:00Z"), reset: false });
+    const m = inviteMessage({ link: "https://viewer.example/invite/abc", expires: new Date("2026-10-04T00:00:00Z") });
     expect(m.text).toContain("https://viewer.example/invite/abc");
-    expect(inviteMessage({ link: "x", expires: new Date(), reset: true }).subject).toMatch(/reset/);
+    expect(m.subject).toBe("You're invited to the PulsHealth viewer");
   });
 
   it("signs the SES request the same way as the viewer", async () => {

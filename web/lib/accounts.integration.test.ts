@@ -157,37 +157,40 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     }
   });
 
-  it("rolls back an invite reset if its replacement session cannot be created", async () => {
+  it("rolls back a new account and invite if its first session cannot be created", async () => {
     const store = await import("./accounts/store");
     const account = (await store.findAccountForLogin(OTHER_EMAIL))!;
     const meta = { userAgent: null, ip: null };
     const held = await session.createSession(account.id, meta);
+    const pending = randomUUID();
+    await admin.query("INSERT INTO users(id) VALUES($1)", [pending]);
     const invite = newInviteToken();
     await admin.query(
       "INSERT INTO auth.invites (token_hash, user_id, email, expires_at) VALUES ($1, $2, $3, now() + interval '1 hour')",
-      [invite.hash, B, OTHER_EMAIL],
+      [invite.hash, pending, `${pending}@synthetic.invalid`],
     );
     try {
       const brokenMeta = {
         get userAgent(): string | null { throw new Error("session creation failed"); },
         ip: null,
       };
-      await expect(store.acceptInvite(invite.token, "reset-hash", brokenMeta, session.tokenHash(held)))
+      await expect(store.acceptInvite(invite.token, "synthetic-first-password-hash", brokenMeta, session.tokenHash(held)))
         .rejects.toThrow("session creation failed");
       expect(await store.findPasswordHash(account.id)).toBe(account.passwordHash);
       expect(await store.findInvite(invite.token)).not.toBeNull();
       expect(await session.findSession(held)).not.toBeNull();
+      expect((await admin.query("SELECT 1 FROM auth.accounts WHERE user_id=$1", [pending])).rows).toEqual([]);
 
-      const result = await store.acceptInvite(invite.token, "reset-hash", meta, session.tokenHash(held));
+      const result = await store.acceptInvite(invite.token, "synthetic-first-password-hash", meta, session.tokenHash(held));
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(await session.findSession(result.sessionToken)).not.toBeNull();
       expect(await session.findSession(held)).toBeNull();
-      await store.changePassword(account.id, account.passwordHash);
-      expect(await session.findSession(result.sessionToken)).toBeNull();
     } finally {
-      await store.changePassword(account.id, account.passwordHash);
-      await admin.query("DELETE FROM auth.invites WHERE token_hash = $1", [invite.hash]);
+      await admin.query("DELETE FROM auth.invites WHERE user_id=$1", [pending]);
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1 OR account_id IN (SELECT id FROM auth.accounts WHERE user_id=$2)", [session.tokenHash(held), pending]);
+      await admin.query("DELETE FROM auth.accounts WHERE user_id=$1", [pending]);
+      await admin.query("DELETE FROM users WHERE id=$1", [pending]);
     }
   });
 
@@ -367,7 +370,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     }
   });
 
-  it("does not let an invite issued before an account was disabled bring it back", async () => {
+  it("keeps a disabled account sealed for both old and newly issued invitations", async () => {
     const stale = newInviteToken();
     await admin.query(
       `INSERT INTO auth.invites (token_hash, user_id, email, created_at, expires_at)
@@ -382,7 +385,6 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     const login = await loginRoute.POST(post("/api/auth/login", { email: OTHER_EMAIL, password: OTHER_PASSWORD }, { ip: "198.51.100.71" }));
     expect(login.headers.get("location")).toBe("/login?error=invalid");
 
-    // A newer invite is the operator's way back in.
     const fresh = newInviteToken();
     await admin.query(
       `INSERT INTO auth.invites (token_hash, user_id, email, created_at, expires_at)
@@ -392,22 +394,37 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("accounts mode (integration)", () => {
     const back = await inviteRoute.POST(
       post("/api/auth/invite", { token: fresh.token, password: OTHER_PASSWORD, confirm: OTHER_PASSWORD }, { ip: "198.51.100.72" }),
     );
-    expect(back.headers.get("location")).toBe("/?notice=welcome");
+    expect(back.headers.get("location")).toBe(`/invite/${fresh.token}?error=invalid`);
+    const sealed = await admin.query<{ sealed: boolean }>("SELECT disabled_at IS NOT NULL AS sealed FROM auth.accounts WHERE user_id=$1", [B]);
+    expect(sealed.rows.at(0)?.sealed).toBe(true);
   });
 
   it("retires the session a browser held when it accepts an invite", async () => {
-    const held = sessionCookie(await loginRoute.POST(post("/api/auth/login", { email: OTHER_EMAIL, password: OTHER_PASSWORD }, { ip: "198.51.100.80" })));
+    const store = await import("./accounts/store");
+    const account = await store.findAccountForLogin(EMAIL);
+    if (!account) throw new Error("Synthetic signed-in account is missing");
+    const held = await session.createSession(account.id, { userAgent: null, ip: null });
     expect(await session.findSession(held)).not.toBeNull();
-    const reset = newInviteToken();
+    const pending = randomUUID();
+    await admin.query("INSERT INTO users(id) VALUES($1)", [pending]);
+    const invite = newInviteToken();
     await admin.query(
       `INSERT INTO auth.invites (token_hash, user_id, email, expires_at) VALUES ($1, $2, $3, now() + interval '1 hour')`,
-      [reset.hash, B, OTHER_EMAIL],
+      [invite.hash, pending, `${pending}@synthetic.invalid`],
     );
-    const res = await inviteRoute.POST(
-      post("/api/auth/invite", { token: reset.token, password: OTHER_PASSWORD, confirm: OTHER_PASSWORD }, { cookie: held, ip: "198.51.100.81" }),
-    );
-    expect(res.headers.get("location")).toBe("/?notice=welcome");
-    expect(await session.findSession(held)).toBeNull();
+    try {
+      const res = await inviteRoute.POST(
+        post("/api/auth/invite", { token: invite.token, password: PASSWORD, confirm: PASSWORD }, { cookie: held, ip: "198.51.100.81" }),
+      );
+      expect(res.headers.get("location")).toBe("/?notice=welcome");
+      expect(await session.findSession(held)).toBeNull();
+      expect((await session.findSession(sessionCookie(res)))?.userId).toBe(pending);
+    } finally {
+      await admin.query("DELETE FROM auth.invites WHERE user_id=$1", [pending]);
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1 OR account_id IN (SELECT id FROM auth.accounts WHERE user_id=$2)", [session.tokenHash(held), pending]);
+      await admin.query("DELETE FROM auth.accounts WHERE user_id=$1", [pending]);
+      await admin.query("DELETE FROM users WHERE id=$1", [pending]);
+    }
   });
 
   it("throttles one address, and one account from many addresses, before checking the password", () => withFixedTime(async () => {

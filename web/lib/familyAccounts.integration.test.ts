@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { NextRequest } from "next/server";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -64,11 +65,17 @@ describe.skipIf(!webUrl || !adminUrl)("family account ownership (integration)", 
     );
     const owner = observed.rows.at(0);
     if (!owner) throw new Error("Existing synthetic account disappeared");
+    const cli = spawnSync(process.execPath, ["scripts/invite.mjs", "--user", member, "--email", email], {
+      cwd: process.cwd(), env: process.env, encoding: "utf8", timeout: 10_000,
+    });
     expect({
-      welcomed: response.headers.get("location") === "/?notice=welcome",
+      refused: response.headers.get("location") === `/invite/${invitation}?error=invalid`,
       issuedBrowser: /__Host-puls-session=[^;\s]+/.test(response.headers.get("set-cookie") ?? ""),
       passwordPreserved: owner.password_preserved,
       browserPreserved: owner.browser_preserved,
-    }).toEqual({ welcomed: false, issuedBrowser: false, passwordPreserved: true, browserPreserved: true });
+      cliRefused: cli.status === 1 && cli.stderr.includes("already has an account"),
+      cliPrintedLink: cli.stdout.includes("/invite/"),
+    }).toEqual({ refused: true, issuedBrowser: false, passwordPreserved: true, browserPreserved: true,
+      cliRefused: true, cliPrintedLink: false });
   });
 });

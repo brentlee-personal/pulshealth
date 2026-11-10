@@ -7,7 +7,7 @@ import { SESSION_COOKIE, tokenHash } from "@/lib/accounts/session";
 import { acceptInvite, findInvite } from "@/lib/accounts/store";
 
 // An invite link's form posts here: the token, and the new password twice.
-// A good token creates the account (or resets the user's existing one) and
+// A good token creates a new account and
 // signs the browser in; a bad one is charged to the client's address like a
 // wrong password (lib/accounts/ratelimit.ts: taken up front, refunded for
 // anything that is not a bad token). Tokens are 256 random bits, so the

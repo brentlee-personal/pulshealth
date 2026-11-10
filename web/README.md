@@ -251,9 +251,10 @@ make web-invite ARGS='--user <uuid> --email ann@example.com' # a one-time viewer
 The second prints `https://<WEB_PUBLIC_URL>/invite/<token>`, valid once for 48
 hours (`--hours`); add `--send` to email it to the person instead (through
 the SES settings below) so the link never appears in your terminal. Opening it asks for a password (at least 10 characters) and
-signs the person in. An invite for a user who already has an account resets
-its password and signs it out everywhere. Use this as an administrator
-recovery path when [email password recovery](#password-recovery) is unavailable. `--admin` marks the
+signs the person into a new account. Existing accounts use
+[owner-verified password recovery](#password-recovery); invitations for an
+existing account are rejected. If recovery cannot verify the owner, the
+account stays sealed. `--admin` marks the new
 account as an administrator, which gives it `/admin` (below). Every signed-in
 personal account can connect its own iPhone from the app or the account page;
 `make issue-device` also remains available to the operator.
@@ -536,8 +537,8 @@ takes up to 30 minutes to stop an assistant**: refreshing stops at once, but
 the access token it holds runs out its time. That applies to **Revoke** on
 the account page (the **AI assistants** section), to disabling an account
 (`auth.set_account_disabled`), to deleting one (`auth.delete_my_account`;
-purging deletes the grants with the account) and to a password change or
-invite reset, which all revoke every grant of the account. Rotating
+purging deletes the grants with the account) and to a password change,
+which all revoke every grant of the account. Rotating
 `PULS_MCP_OAUTH_SECRET` ends every access token at once. Refresh tokens
 stay valid, and assistants carry on with new access tokens.
 

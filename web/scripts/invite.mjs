@@ -5,11 +5,9 @@
 //                                                   [--url https://<viewer host>] [--hours 48] [--send]
 //   make web-invite ARGS='--user <uuid> --email <address> [--admin]'
 //
-// The person opens the link, chooses a password and is signed in. If the user
-// already has an account, the link resets its password (and signs it out
-// everywhere) instead — the way back in for a forgotten password, since the
-// viewer sends no email. The first administrator is invited the same way,
-// with --admin.
+// The person opens the link, creates a new account and is signed in. Existing
+// accounts use owner-verified password recovery. The first administrator is
+// invited with --admin.
 //
 // The user must already exist in the database: issue the person's device
 // token first (`make issue-device NAME=… ARGS='--user <uuid>'`), which
@@ -132,13 +130,11 @@ export async function sesSend({ to, subject, text }, env = process.env, now = ne
   if (!res.ok) throw new Error(`SES answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 
-export function inviteMessage({ link, expires, reset }) {
+export function inviteMessage({ link, expires }) {
   return {
-    subject: reset ? "Your PulsHealth password reset link" : "You're invited to the PulsHealth viewer",
+    subject: "You're invited to the PulsHealth viewer",
     text: [
-      reset
-        ? "Here is a link to choose a new password for your PulsHealth viewer account. Using it signs the account out everywhere else."
-        : "You've been invited to view your own health records in the PulsHealth viewer.",
+      "You've been invited to view your own health records in the PulsHealth viewer.",
       "",
       `Choose a password here (the link works once, until ${expires.toUTCString()}):`,
       `  ${link}`,
@@ -177,6 +173,10 @@ async function main() {
       return 1;
     }
     const existing = await client.query("SELECT email FROM auth.accounts WHERE user_id = $1", [user]);
+    if (existing.rowCount) {
+      console.error("invite: this member already has an account. Use owner-verified password recovery; invitations cannot replace it.");
+      return 1;
+    }
     const { token, hash } = newInviteToken();
     const inserted = await client.query(
       `INSERT INTO auth.invites (token_hash, user_id, email, is_admin, expires_at)
@@ -186,19 +186,16 @@ async function main() {
     );
     const path = `/invite/${token}`;
     if (send) {
-      const message = inviteMessage({ link: `${url}${path}`, expires: inserted.rows[0].expires_at, reset: existing.rowCount > 0 });
+      const message = inviteMessage({ link: `${url}${path}`, expires: inserted.rows[0].expires_at });
       try {
         await sesSend({ to: email, ...message });
-        console.log(`Emailed ${existing.rowCount ? "a password-reset" : "an invite"} link to ${email}${admin ? " (administrator)" : ""}, user ${user}.`);
+        console.log(`Emailed an invite link to ${email}${admin ? " (administrator)" : ""}, user ${user}.`);
         return 0;
       } catch (e) {
         console.error(`invite: the email was not sent (${e instanceof Error ? e.message : e}); here is the link to send yourself:`);
       }
     }
-    const what = existing.rowCount
-      ? `Password reset for ${existing.rows[0].email}'s account (it will sign in as ${email})`
-      : `Invite for ${email}`;
-    console.log(`${what}${admin ? ", as an administrator" : ""}, user ${user}.`);
+    console.log(`Invite for ${email}${admin ? ", as an administrator" : ""}, user ${user}.`);
     console.log(`Works once, until ${inserted.rows[0].expires_at.toISOString()}. Send it privately:\n`);
     if (url) {
       console.log(`  ${url}${path}\n`);
