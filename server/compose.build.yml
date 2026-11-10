@@ -19,28 +19,29 @@
 
 services:
   ingest:
-    image: pulshealth-ingest:dev
+    image: family-health-ingest:${DEPLOY_COMMIT:-unbuilt}
     build:
       context: ./ingest
       args:
         BUILD_COMMIT: ${DEPLOY_COMMIT:-unknown}
 
   api:
-    image: pulshealth-api:dev
+    image: family-health-api:${DEPLOY_COMMIT:-unbuilt}
     build:
       context: ./api
       args:
         BUILD_COMMIT: ${DEPLOY_COMMIT:-unknown}
 
   mcp:
-    image: pulshealth-mcp:dev
+    profiles: [mcp-pending]
+    image: family-health-mcp:${DEPLOY_COMMIT:-unbuilt}
     build:
       context: ./mcp
       args:
         BUILD_COMMIT: ${DEPLOY_COMMIT:-unknown}
 
   web:
-    image: pulshealth-web:dev
+    image: family-health-web:${DEPLOY_COMMIT:-unbuilt}
     # The sibling web/ directory: build from a checkout that contains both
     # server/ and web/.
     build:

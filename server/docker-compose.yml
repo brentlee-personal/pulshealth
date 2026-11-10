@@ -1,505 +1,209 @@
-name: pulshealth
+name: family-health-data
 
-# Bounded json-file logs for the application containers. Ingest logs a line
-# per batch and every rejection, and nothing else on the host prunes: without
-# a cap, a busy month fills the disk that holds the only copy of the data.
-# Not applied to `db`: keep the database service definition minimal and
-# change it deliberately — Compose recreates the container on any change to
-# it (the data volume survives, but treat db edits as their own step).
-x-app-logging: &app-logging
+x-db-image: &db-image timescale/timescaledb-ha:pg17.11-ts2.29.2
+x-logging: &logging
   driver: json-file
   options:
-    max-size: "50m"
-    max-file: "5"
-
-# The PostgreSQL + TimescaleDB image, pinned to an exact tag and shared by the
-# db and migrate services so the two can never drift apart. The floating
-# `pg17` tag moves TimescaleDB minor versions underneath running installs
-# (its internal catalog changed between 2.27 and 2.29), so bumping this is a
-# deliberate step — see server/README.md, "Upgrading the database image".
-x-db-image: &db-image timescale/timescaledb-ha:pg17.11-ts2.29.2
-
-# Healthchecks for the app services. ingest, api and mcp are distroless (no
-# shell, no curl), so each binary checks itself: `<binary> healthcheck` GETs
-# its own /healthz on loopback and exits 0 on a 200. A check answers
-# "healthy" only when the service can do its job — ingest and the API when
-# their database answers, mcp when the product API does, web when its
-# database does. That status shows in `docker compose ps`, gates the
-# `depends_on: condition: service_healthy` below and `docker compose up
-# --wait`. It does NOT restart anything: `restart: unless-stopped` acts only
-# when a process exits, and Docker without Swarm never restarts a container
-# for being unhealthy. To act on it, watch `docker compose ps` (or the
-# health_status events) from your monitoring. The probes are cheap (/healthz
-# caches its database check for two seconds).
-x-app-healthcheck: &app-healthcheck
+    max-size: "20m"
+    max-file: "3"
+x-app: &app
+  restart: unless-stopped
+  logging: *logging
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  tmpfs: [/tmp]
+  cpus: 0.5
+  mem_limit: 512m
+x-health: &health
   interval: 10s
   timeout: 5s
   retries: 3
-  # connectWithRetry waits up to 60 s for the database at startup.
   start_period: 60s
 
-# The four app services (ingest, api, mcp, web) pull published images from
-# ghcr.io/pulshealth/<name>:${PULS_VERSION:-latest} — built by
-# .github/workflows/release.yml for linux/amd64 and linux/arm64. To run
-# what is in this checkout instead, add the developer overlay, which puts
-# the `build:` blocks back:
-#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
-# (`make dev-up` from the repository root). See server/README.md, "Images
-# and versions".
-
+# Build this checkout with compose.build.yml. No upstream shared-mode image is used.
+# MCP, Grafana, backup and external ingress remain disabled pending their own gates.
 services:
+  init-secrets:
+    image: node@sha256:7c76769f1afc177f5d8f55330c9123b2d869f05077022c28bf91c74e6216721f
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    mem_limit: 128m
+    entrypoint: [node, /puls/init-secrets.mjs]
+    command: [/secrets, /pgdata, /settings.env]
+    volumes:
+      - ../web/scripts:/puls:ro
+      - type: bind
+        source: ./.env
+        target: /settings.env
+        read_only: true
+        bind:
+          create_host_path: false
+      - db_data:/pgdata:ro
+      - db_secrets:/secrets/db
+      - migrate_secrets:/secrets/migrate
+      - api_secrets:/secrets/api
+      - ingest_secrets:/secrets/ingest
+      - web_secrets:/secrets/web
+      - auth_signing:/secrets/signing
+      - auth_public:/secrets/public
+
   db:
-    # Plain PostgreSQL + TimescaleDB. The schema is NOT applied here: the
-    # image's own initdb hooks only run on an empty volume, so the `migrate`
-    # service below owns the schema and runs on every start instead.
     image: *db-image
     restart: unless-stopped
-    # Docker's default /dev/shm is 64 MB; PostgreSQL's parallel workers and
-    # hash joins use it, and a query over a few years of samples fails with
-    # "could not resize shared memory segment" once it is exhausted.
-    shm_size: 1g
+    logging: *logging
+    cpus: 1
+    mem_limit: 1g
+    shm_size: 256m
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db/POSTGRES_PASSWORD
     volumes:
       - db_data:/home/postgres/pgdata/data
-    ports:
-      # Localhost only — never exposed beyond the host.
-      - "127.0.0.1:5432:5432"
+      - db_secrets:/run/secrets/db:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      test: [CMD-SHELL, pg_isready -U postgres -d postgres]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 30s
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
 
   migrate:
-    # One-shot schema migrator, run before every app service on each
-    # `docker compose up -d`: applies pending files from db/migrations/ in
-    # order, records them in schema_migrations, re-runs the env-driven role
-    # and time-zone scripts, then exits. The app services start only after it
-    # exits 0 (service_completed_successfully), so a failed migration stops
-    # the stack loudly instead of running new code against an old schema.
-    # Same pinned image as db (psql + bash, nothing to build). By hand:
-    #   docker compose run --rm migrate            # apply pending migrations
-    #   docker compose run --rm migrate baseline   # adopt a pre-existing database
-    # See server/README.md, "Schema migrations".
     image: *db-image
     restart: "no"
-    logging: *app-logging
-    entrypoint: ["bash", "/puls/migrate.sh"]
+    user: "1000:1000"
+    logging: *logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    cpus: 0.5
+    mem_limit: 512m
+    entrypoint: [bash, /puls/run-migrate.sh]
     environment:
       PGHOST: db
       PGPORT: "5432"
       POSTGRES_USER: postgres
       POSTGRES_DB: postgres
-      PGPASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db/POSTGRES_PASSWORD
+      GRAFANA_DB_PASSWORD_FILE: /run/secrets/migrate/GRAFANA_DB_PASSWORD
+      API_DB_PASSWORD_FILE: /run/secrets/migrate/API_DB_PASSWORD
+      INGEST_DB_PASSWORD_FILE: /run/secrets/migrate/INGEST_DB_PASSWORD
+      WEB_DB_PASSWORD_FILE: /run/secrets/migrate/WEB_DB_PASSWORD
       MIGRATIONS_DIR: /puls/migrations
-      # Read by 099_read_roles.sh on every run: creates the grafana,
-      # api_reader and ingest roles and rotates their passwords to these.
-      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?set in .env}
-      API_DB_PASSWORD: ${API_DB_PASSWORD:?set in .env}
-      INGEST_DB_PASSWORD: ${INGEST_DB_PASSWORD:?set in .env}
-      # Optional: the web_app role, which only the web viewer's accounts mode
-      # connects as (it reads health data solely through the per-user views
-      # in schema `web`). Unset, the role is not created and an existing one
-      # cannot log in. See web/README.md, "Access control".
-      WEB_DB_PASSWORD: ${WEB_DB_PASSWORD:-}
-      # 022 keeps public-demo phone pairing disabled in the database.
-      WEB_DEMO_USER: ${WEB_DEMO_USER:-}
       WEB_PERSONAL_USERS: ${WEB_PERSONAL_USERS:-}
-      # Protect the configured legacy/default owner from account deletion.
-      PULS_USER_ID: ${PULS_USER_ID:-5ea4d000-0000-4000-8000-000000000001}
-      # Calendar zone for every daily view (metric_daily, Grafana daily
-      # panels, the api's local-day ranges). Must match the phone's zone.
-      # 013_time_zone.sh validates it and stores it on the database
-      # (ALTER DATABASE … SET) on every run, so changing it later is: edit
-      # .env, `docker compose up -d`.
       PULS_TIME_ZONE: ${PULS_TIME_ZONE:-UTC}
     volumes:
+      - ./db/run-migrate.sh:/puls/run-migrate.sh:ro
       - ./db/migrate.sh:/puls/migrate.sh:ro
       - ./db/migrations:/puls/migrations:ro
+      - db_secrets:/run/secrets/db:ro
+      - migrate_secrets:/run/secrets/migrate:ro
     depends_on:
       db:
         condition: service_healthy
 
   ingest:
-    image: ghcr.io/pulshealth/ingest:${PULS_VERSION:-latest}
-    restart: unless-stopped
-    logging: *app-logging
-    # Longer than Compose's 10 s default, so a batch being inserted when the
-    # stack restarts finishes and is acknowledged instead of being SIGKILLed.
+    <<: *app
+    image: family-health-ingest:${DEPLOY_COMMIT:-unbuilt}
+    user: "65533:65533"
     stop_grace_period: 30s
     environment:
-      # Connects as the scoped DML-only `ingest` role (created and kept
-      # current by 099_read_roles.sh from INGEST_DB_PASSWORD) — the only
-      # internet-facing service never holds the superuser password. To run
-      # as the superuser instead, set INGEST_DB_USER=postgres and
-      # INGEST_DB_PASSWORD to the same value as POSTGRES_PASSWORD in .env.
-      DATABASE_URL: postgres://${INGEST_DB_USER:-ingest}:${INGEST_DB_PASSWORD:?set in .env}@db:5432/postgres?sslmode=disable
-      # The shared bearer token. Optional since per-device tokens exist
-      # (`make devices ARGS='issue …'`): leave it empty, or set
-      # PULS_ALLOW_SHARED_TOKEN=false, and only device tokens authenticate.
-      PULS_TOKEN: ${PULS_TOKEN:-}
-      PULS_ALLOW_SHARED_TOKEN: ${PULS_ALLOW_SHARED_TOKEN:-true}
-      # Not read by the server. `ingest devices issue` puts it in the pairing
-      # QR code it prints with a new token, when --url does not say otherwise:
-      # a container cannot see the proxy in front of it or the host's LAN
-      # address, so the URL the phone uses has to be handed in.
+      DATABASE_URL_FILE: /run/secrets/ingest/DATABASE_URL
       PULS_PUBLIC_URL: ${PULS_PUBLIC_URL:-}
       LISTEN_ADDR: ":8080"
-      # Batches decoded and inserted concurrently; beyond it a request waits
-      # briefly, then gets 503 + Retry-After. Bounds the service's memory.
       PULS_MAX_INFLIGHT_BATCHES: ${PULS_MAX_INFLIGHT_BATCHES:-4}
-      # Whether to believe X-Forwarded-For when identifying the client an
-      # auth-failure budget belongs to. Only true when a proxy is the ONLY
-      # way to reach port 8080 — a reverse proxy, Cloudflare Tunnel or
-      # Tailscale Serve/Funnel; the client is then the header's LAST entry,
-      # the one that proxy appended (a client can write the ones before it).
-      # Left false (the default), every client is identified by the TCP peer
-      # address, which is right for INGEST_BIND_ADDR=0.0.0.0 and for a proxy
-      # on the same host that does not set the header. See server/README.md,
-      # "Rate limiting".
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+    volumes:
+      - ingest_secrets:/run/secrets/ingest:ro
     ports:
-      # Loopback by default. Put a TLS-terminating proxy in front of it
-      # (reverse proxy, Tailscale Serve/Funnel, VPN) — the phone must reach
-      # this port over HTTPS from anywhere beyond the local network.
-      # INGEST_BIND_ADDR=0.0.0.0 (what `scripts/bootstrap.sh --lan` sets)
-      # publishes it on every interface so a phone on the same Wi-Fi can use
-      # plain http://<this host's LAN IP>:8080 with no proxy; the bearer token
-      # is then the only protection, and anything else on that network can
-      # see the traffic. Never do that on a network you do not control.
-      - "${INGEST_BIND_ADDR:-127.0.0.1}:8080:8080"
+      - "127.0.0.1:8080:8080"
     healthcheck:
-      <<: *app-healthcheck
-      test: ["CMD", "/ingest", "healthcheck"]
+      <<: *health
+      test: [CMD, /ingest, healthcheck]
     depends_on:
-      db:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
 
   api:
-    image: ghcr.io/pulshealth/api:${PULS_VERSION:-latest}
-    restart: unless-stopped
-    logging: *app-logging
-    # Same reason as ingest's: let a streaming export finish on restart.
+    <<: *app
+    image: family-health-api:${DEPLOY_COMMIT:-unbuilt}
+    user: "65532:65532"
     stop_grace_period: 30s
     environment:
-      DATABASE_URL: postgres://api_reader:${API_DB_PASSWORD}@db:5432/postgres?sslmode=disable
-      PULS_API_TOKEN: ${PULS_API_TOKEN:?set in .env}
+      DATABASE_URL_FILE: /run/secrets/api/DATABASE_URL
       LISTEN_ADDR: ":8081"
-      # The user a request is answered for when it names none (the same
-      # viewer user as the web container). ?user=<uuid> selects another one
-      # only when PULS_MULTI_USER is true; off, any other user is a 403.
-      PULS_USER_ID: ${PULS_USER_ID:-5ea4d000-0000-4000-8000-000000000001}
-      PULS_MULTI_USER: ${PULS_MULTI_USER:-false}
-      # Same calendar zone as the database (see the migrate service). The
-      # api refuses to start on an unknown zone name, and on one that is not
-      # the database's puls_time_zone() (a migrate that has not re-run since
-      # .env changed). It reports the zone on GET /v1/users.
       PULS_TIME_ZONE: ${PULS_TIME_ZONE:-UTC}
-      # Whether X-Forwarded-* may be believed: the client an auth failure is
-      # charged to, and the host /openapi.json advertises. Same switch and
-      # same default as ingest's.
+      PULS_AUTH_ISSUER: ${WEB_PUBLIC_URL:?set the private viewer origin}
+      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-/auth-public/key-v1.json}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
-    ports:
-      # Loopback only: expose it through an authenticated HTTPS proxy (e.g.
-      # Tailscale Serve). Do not publish the bearer-token surface on the LAN.
-      - "127.0.0.1:8081:8081"
+    volumes:
+      - api_secrets:/run/secrets/api:ro
+      - auth_public:/auth-public:ro
     healthcheck:
-      <<: *app-healthcheck
-      test: ["CMD", "/api", "healthcheck"]
+      <<: *health
+      test: [CMD, /api, healthcheck]
     depends_on:
-      db:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
 
-  mcp:
-    # Read-only MCP server for AI assistants (docs/ai.md). It talks only to
-    # the product API over the internal network — never to Postgres — and
-    # serves the streamable HTTP transport at /mcp behind PULS_MCP_TOKEN.
-    # The same binary runs in stdio mode on a laptop for Claude Desktop,
-    # Claude Code or Cursor; this service is the remote-connector path.
-    image: ghcr.io/pulshealth/mcp:${PULS_VERSION:-latest}
-    restart: unless-stopped
-    logging: *app-logging
-    environment:
-      PULS_API_URL: http://api:8081
-      PULS_API_TOKEN: ${PULS_API_TOKEN:?set in .env}
-      PULS_MCP_TOKEN: ${PULS_MCP_TOKEN:?set in .env}
-      # No PULS_TIME_ZONE: every date the tools speak is a calendar day in
-      # the zone the product API reports (GET /v1/users), which is the
-      # stack's PULS_TIME_ZONE, checked against the database by the API.
-      # Same switch, default and rule as ingest's and the API's: the
-      # auth-failure limiter on /mcp keys on the LAST X-Forwarded-For entry
-      # only when a proxy is the only way in.
-      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
-      # Optional: pin this connector to one person. Empty (the default)
-      # leaves the choice to each tool call — the API's PULS_USER_ID unless
-      # a call names another user, which the API's PULS_MULTI_USER gates.
-      # Deliberately not the API's PULS_USER_ID: pinning to that would make
-      # the connector unable to read anyone else even with the gate open.
-      PULS_USER_ID: ${PULS_MCP_USER_ID:-}
-      # OAuth verifier: public keys only. The old secret is passed only to reject obsolete configuration.
-      PULS_MCP_OAUTH_SECRET: ${PULS_MCP_OAUTH_SECRET:-}
-      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-}
-      PULS_MCP_URL: ${PULS_MCP_URL:-}
-      PULS_MCP_OAUTH_ISSUER: ${PULS_MCP_OAUTH_ISSUER:-${WEB_PUBLIC_URL:-}}
-    volumes:
-      - auth_public:/auth-public:ro
-    ports:
-      # Loopback only: the token grants read access to the health data, so
-      # publish it only through an HTTPS proxy, like the API (e.g.
-      # `tailscale serve --bg --https=8445 http://localhost:8082`).
-      - "127.0.0.1:8082:8082"
-    healthcheck:
-      <<: *app-healthcheck
-      # The image's command serves --http :8082, the address this asks.
-      test: ["CMD", "/mcp", "healthcheck"]
-    depends_on:
-      # Healthy, not merely started: the MCP's own /healthz is the API's.
-      # Restarted with it, so a changed PULS_TIME_ZONE (which recreates the
-      # api) is picked up at once rather than at the MCP's hourly re-ask.
-      api:
-        condition: service_healthy
-        restart: true
-
   web:
-    # Next.js health viewer. Reads Postgres directly over the internal
-    # network as the read-only `grafana` role — same data Grafana sees — or,
-    # in accounts mode, as `web_app`, which the database limits to the
-    # signed-in person's own records.
-    # The developer overlay builds it from the sibling web/ directory
-    # (../web relative to this file), so build from a full checkout.
-    image: ghcr.io/pulshealth/web:${PULS_VERSION:-latest}
-    restart: unless-stopped
-    logging: *app-logging
+    <<: *app
+    image: family-health-web:${DEPLOY_COMMIT:-unbuilt}
+    user: "1001:1001"
+    mem_limit: 1g
     environment:
-      # Basic and open mode: the read-only grafana role. Accounts mode must
-      # connect as web_app instead — set WEB_DATABASE_URL (see .env.example);
-      # the viewer serves no data in accounts mode as any role that can read
-      # the tables directly.
-      DATABASE_URL: ${WEB_DATABASE_URL:-postgres://grafana:${GRAFANA_DB_PASSWORD}@db:5432/postgres?sslmode=disable}
-      PULS_USER_ID: ${PULS_USER_ID:-5ea4d000-0000-4000-8000-000000000001}
+      DATABASE_URL_FILE: /run/secrets/web/DATABASE_URL
+      WEB_ACCOUNTS: "true"
       PULS_TIME_ZONE: ${PULS_TIME_ZONE:-UTC}
-      # Set it and every page asks for this password over HTTP Basic (any
-      # username; /api/healthz stays open for health checks). Left empty the
-      # viewer has no login at all, exactly as before, and says so in its
-      # startup log. scripts/bootstrap.sh generates one on a fresh install
-      # and prints it. See web/README.md, "Access control".
-      WEB_AUTH_PASSWORD: ${WEB_AUTH_PASSWORD:-}
-      # Accounts mode: people sign in with their own email and password
-      # (invite-only, `make web-invite`) and each sees only their own
-      # records. Needs WEB_DATABASE_URL (web_app) and HTTPS in front — behind
-      # a TLS proxy, TRUST_PROXY_HEADERS=true. See web/README.md, "Access
-      # control".
-      WEB_ACCOUNTS: ${WEB_ACCOUNTS:-false}
-      # Same switch as ingest's and the API's: believe X-Forwarded-Proto/-Host
-      # and the client-address header only when a proxy is the only way in.
-      # WEB_CLIENT_IP_HEADER picks that header, read by its LAST entry (the
-      # one the proxy appended): x-forwarded-for (default), or
-      # cf-connecting-ip behind Cloudflare, which sets it itself.
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       WEB_CLIENT_IP_HEADER: ${WEB_CLIENT_IP_HEADER:-x-forwarded-for}
-      # The viewer's public https:// address: completes the links
-      # `make web-invite` prints, and is accepted as an Origin.
-      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-}
-      # Postgres connections the viewer holds at once (clamped to 1–50). A
-      # type page runs several queries in parallel, so a viewer a few people
-      # use at the same time wants more than the default.
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:?set the private viewer origin}
       WEB_DB_POOL_SIZE: ${WEB_DB_POOL_SIZE:-4}
-      # Accounts mode only. WEB_SIGNUPS=true lets strangers ask for an account
-      # at /signup; nothing exists for them until an administrator approves
-      # on /admin. WEB_INGEST_URL is where an iPhone connected from the
-      # account page syncs to (ingest's public HTTPS address, PULS_PUBLIC_URL
-      # unless set). The WEB_SES_* and WEB_MAIL_FROM lines turn on email
-      # (Amazon SES: the operator's notices to WEB_ADMIN_EMAIL, and approved
-      # people's invites); unset, nothing is emailed. See web/README.md.
       WEB_SIGNUPS: ${WEB_SIGNUPS:-false}
-      WEB_INGEST_URL: ${WEB_INGEST_URL:-${PULS_PUBLIC_URL:-}}
+      WEB_INGEST_URL: ${PULS_PUBLIC_URL:-}
       WEB_SES_REGION: ${WEB_SES_REGION:-us-east-1}
-      WEB_SES_ACCESS_KEY_ID: ${WEB_SES_ACCESS_KEY_ID:-}
-      WEB_SES_SECRET_ACCESS_KEY: ${WEB_SES_SECRET_ACCESS_KEY:-}
+      WEB_SES_ACCESS_KEY_ID_FILE: ${WEB_SES_ACCESS_KEY_ID_FILE:-}
+      WEB_SES_SECRET_ACCESS_KEY_FILE: ${WEB_SES_SECRET_ACCESS_KEY_FILE:-}
       WEB_MAIL_FROM: ${WEB_MAIL_FROM:-}
       WEB_ADMIN_EMAIL: ${WEB_ADMIN_EMAIL:-}
       WEB_APP_STORE_ALERT_TO: ${WEB_APP_STORE_ALERT_TO:-}
-      # Accounts mode only: the user whose account is the public demo. /demo
-      # signs visitors into it, view-only, for two hours; it must hold only
-      # sample data (`make web-demo` creates the account). Unset, /demo is a
-      # 404. See web/README.md, "Demo account".
-      WEB_DEMO_USER: ${WEB_DEMO_USER:-}
-      # Only the authorization signer mounts the private volume.
-      # The deprecated shared variable is rejected when nonempty.
-      PULS_MCP_OAUTH_SECRET: ${PULS_MCP_OAUTH_SECRET:-}
-      PULS_AUTH_PRIVATE_KEY_FILE: ${PULS_AUTH_PRIVATE_KEY_FILE:-}
-      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-}
-      PULS_AUTH_KEY_ID: ${PULS_AUTH_KEY_ID:-}
-      PULS_MCP_URL: ${PULS_MCP_URL:-}
-      # Used only inside the authenticated, account-scoped public health gateway.
+      PULS_AUTH_PRIVATE_KEY_FILE: ${PULS_AUTH_PRIVATE_KEY_FILE:-/auth-keys/key-v1.pem}
+      PULS_AUTH_PUBLIC_KEYS_FILE: ${PULS_AUTH_PUBLIC_KEYS_FILE:-/auth-public/key-v1.json}
+      PULS_AUTH_KEY_ID: ${PULS_AUTH_KEY_ID:-key-v1}
+      PULS_MCP_URL: ${PULS_MCP_URL:-${WEB_PUBLIC_URL}/mcp}
       PULS_API_URL: http://api:8081
-      PULS_API_TOKEN: ${PULS_API_TOKEN:?set in .env}
-      # Hosted deletion receipts survive database restores; configure this
-      # path only once its independent volume is backed up and monitored.
       PULS_DELETION_LEDGER_DIR: ${PULS_DELETION_LEDGER_DIR:-}
     volumes:
-      - ${PULS_DELETION_LEDGER_VOLUME:-deletion_ledger}:/deletion-ledger
+      - web_secrets:/run/secrets/web:ro
       - auth_signing:/auth-keys
       - auth_public:/auth-public
+      - deletion_ledger:/deletion-ledger
     ports:
-      # 3000 is Grafana. Default to loopback; to reach the viewer from other
-      # machines set WEB_BIND_ADDR to a private interface, e.g. the host's
-      # Tailscale IPv4, rather than 0.0.0.0 — WEB_AUTH_PASSWORD is a password
-      # prompt, not TLS, so the bind address still matters.
-      - "${WEB_BIND_ADDR:-127.0.0.1}:3001:3000"
+      - "127.0.0.1:3001:3000"
     healthcheck:
-      <<: *app-healthcheck
+      <<: *health
       interval: 30s
-      # A Node image: node's own fetch asks /api/healthz (exempt from the
-      # Basic login and from accounts mode's HTTPS rule), 200 when the
-      # database answers.
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/healthz',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/healthz',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
     depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  tunnel:
-    # Optional, behind the `tunnel` profile: a Cloudflare Tunnel that serves
-    # the web viewer on a hostname of yours (https://viewer.example.com)
-    # without opening a port or revealing the host's address. Cloudflare
-    # terminates TLS and so sees the traffic; in return it adds its WAF, rate
-    # limiting and, optionally, Access in front. It reaches the viewer by its
-    # container name (http://web:3000 — the service URL to give the tunnel's
-    # route in the dashboard), so WEB_BIND_ADDR stays on loopback. A second
-    # route on the same tunnel can publish the MCP server for hosted
-    # connectors (https://mcp.example.com → http://mcp:8082; docs/ai.md,
-    # "Hosted connectors (OAuth)").
-    #
-    # Meant for the viewer's accounts mode (WEB_ACCOUNTS=true) with
-    # TRUST_PROXY_HEADERS=true, WEB_CLIENT_IP_HEADER=cf-connecting-ip and
-    # WEB_PUBLIC_URL set: a viewer in basic or open mode should not be on the
-    # internet. To keep it on across `docker compose up -d` and `make dev-up`,
-    # put COMPOSE_PROFILES=tunnel in .env. See server/README.md, "Exposing the
-    # server", and web/README.md, "Access control".
-    image: cloudflare/cloudflared:2026.9.3
-    profiles: ["tunnel"]
-    restart: unless-stopped
-    logging: *app-logging
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      # The tunnel's token (Cloudflare dashboard → Networks → Tunnels → your
-      # tunnel → install connector). Whoever holds it can serve traffic for
-      # the tunnel's hostnames: treat it like a password.
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
-    depends_on:
-      - web
-
-  grafana:
-    # Pinned: a :latest pull to Grafana 13 silently broke datasource
-    # provisioning (legacy top-level `database:` key removed). Bump
-    # deliberately and retest the dashboard after upgrades.
-    image: grafana/grafana:13.2.3
-    restart: unless-stopped
-    logging: *app-logging
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set in .env}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      # Geomap panels left on "Default base layer" tile CARTO's raster
-      # basemap, which has watermarked every keyless request ("API KEY
-      # REQUIRED") since September 2026. The provisioned Workout Route panel
-      # names its OpenStreetMap basemap explicitly; this makes a panel someone
-      # adds with the default do the same. No key, no account.
-      GF_GEOMAP_DEFAULT_BASELAYER_CONFIG: '{"type":"osm-standard","config":{}}'
-      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
-      # Recipient of every alert (provisioning/alerting/contact-points.yml).
-      GRAFANA_ALERT_EMAIL: ${GRAFANA_ALERT_EMAIL:-alerts@example.com}
-      # Alert delivery. Defaults to off so a deploy never fails on a missing
-      # app password: rules still evaluate and the dashboard still turns red,
-      # only the email leg is inert. Flip GRAFANA_SMTP_ENABLED to true in .env
-      # once GRAFANA_SMTP_PASSWORD holds a Gmail app password (see .env.example).
-      GF_SMTP_ENABLED: ${GRAFANA_SMTP_ENABLED:-false}
-      GF_SMTP_HOST: ${GRAFANA_SMTP_HOST:-smtp.gmail.com:587}
-      GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
-      GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
-      GF_SMTP_FROM_ADDRESS: ${GRAFANA_SMTP_FROM:-${GRAFANA_SMTP_USER:-}}
-      GF_SMTP_FROM_NAME: PulsHealth
-      GF_SMTP_STARTTLS_POLICY: MandatoryStartTLS
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      # Loopback only, like ingest and the API: this is an admin login whose
-      # datasource can read every table including users (name/email/DOB).
-      # Reach it from elsewhere through an HTTPS proxy, e.g.
-      # `tailscale serve --bg --https=8443 http://localhost:3000`.
-      - "127.0.0.1:3000:3000"
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  backup:
-    # Opt-in database backups (SRV-9). Behind the `backup` profile, so a plain
-    # `docker compose up -d` does not start it and the stack is unchanged for
-    # anyone who does not ask:
-    #
-    #   docker compose --profile backup up -d backup   # scheduled dumps
-    #   docker compose run --rm backup once        # one dump now (`make backup`)
-    #   docker compose run --rm backup list        # what is in the store
-    #
-    # Same pinned image as db and migrate, so pg_dump always matches the
-    # server version. Restoring is server/backup/restore.sh (`make restore
-    # FILE=…`) — read it before you need it. See server/README.md,
-    # "Backup & restore".
-    image: *db-image
-    profiles: ["backup"]
-    restart: unless-stopped
-    logging: *app-logging
-    entrypoint: ["bash", "/puls/backup.sh"]
-    # Root so the dump directory is writable whether it is the named volume
-    # (created root-owned, since the image has no /backups) or a host
-    # directory; the script hands each finished dump to the directory's owner.
-    user: root
-    environment:
-      PGHOST: db
-      PGPORT: "5432"
-      PGUSER: postgres
-      PGDATABASE: postgres
-      PGPASSWORD: ${POSTGRES_PASSWORD:?set in .env}
-      BACKUP_DIR: /backups
-      # Time between dumps: 24h, 90m, 3600s or bare seconds. The schedule is
-      # relative to when the container started, not to the wall clock — see
-      # the note in backup.sh about why this is a sleep loop and not cron.
-      PULS_BACKUP_INTERVAL: ${PULS_BACKUP_INTERVAL:-24h}
-      # Dumps older than this are deleted after each run; 0 keeps everything.
-      # The newest dump is never deleted, however old it is.
-      PULS_BACKUP_KEEP_DAYS: ${PULS_BACKUP_KEEP_DAYS:-14}
-      PULS_BACKUP_STRICT_RETENTION: ${PULS_BACKUP_STRICT_RETENTION:-false}
-    volumes:
-      - ./backup/backup.sh:/puls/backup.sh:ro
-      - ./backup/deletion-ledger.sh:/puls/deletion-ledger.sh:ro
-      - ${PULS_DELETION_LEDGER_VOLUME:-deletion_ledger}:/deletion-ledger:ro
-      # PULS_BACKUP_DIR unset (the default) leaves this as the `backups` named
-      # volume below. Set it to a path — an external disk, a NAS mount, an
-      # absolute or ./relative directory — and dumps land there instead, which
-      # is the only version of this that survives losing the machine.
-      - ${PULS_BACKUP_DIR:-backups}:/backups
-    depends_on:
-      db:
+      api:
         condition: service_healthy
 
 volumes:
+  db_data:
+  db_secrets:
+  migrate_secrets:
+  api_secrets:
+  ingest_secrets:
+  web_secrets:
   auth_signing:
   auth_public:
-  db_data:
-  grafana_data:
-  # Only created when the `backup` profile is used and PULS_BACKUP_DIR is unset.
-  backups:
-  # Never restore this ledger from a health-data snapshot or expire receipts.
   deletion_ledger:

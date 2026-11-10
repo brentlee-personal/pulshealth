@@ -18,5 +18,5 @@ LABEL org.opencontainers.image.revision=$BUILD_COMMIT \
       org.opencontainers.image.source="https://github.com/PulsHealth/pulshealth"
 COPY --from=build /ingest /ingest
 EXPOSE 8080
-USER nonroot
+USER 65533:65533
 ENTRYPOINT ["/ingest"]
