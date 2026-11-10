@@ -280,6 +280,19 @@ BEGIN
     RAISE EXCEPTION 'api_reader relation ACL set is not exact';
   END IF;
   IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname IN ('public','auth','web','_timescaledb_internal')
+      AND c.relkind IN ('r','p','v','m','f')
+      AND (n.nspname='auth' OR EXISTS (
+        SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid
+          AND a.attname='user_id' AND a.attnum>0 AND NOT a.attisdropped
+      ) OR (n.nspname='public' AND c.relname IN ('users','sources','sample_types','category_labels','aggregate_series')))
+      AND (has_table_privilege('api_reader',c.oid,'SELECT')
+           OR has_any_column_privilege('api_reader',c.oid,'SELECT'))
+  ) THEN
+    RAISE EXCEPTION 'api_reader can read a protected relation outside its scoped views';
+  END IF;
+  IF EXISTS (
     WITH expected(nspname,privilege_type,is_grantable) AS (
       VALUES ('public','USAGE',false)
       UNION ALL SELECT 'api','USAGE',false WHERE scoped

@@ -212,11 +212,20 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 			}
 		})
 		t.Run("direct base table", func(t *testing.T) {
-			var value int
-			err := store.pool.QueryRow(ctx, "SELECT 1 FROM public.quantity_samples LIMIT 1").Scan(&value)
-			var denied *pgconn.PgError
-			if !errors.As(err, &denied) || denied.Code != "42501" {
-				t.Fatal("API database role could read a health base table directly")
+			for _, relation := range []string{
+				"public.users", "public.batches", "public.sources", "public.sample_types", "public.category_labels",
+				"public.quantity_samples", "public.category_samples", "public.workouts", "public.heartbeat_series",
+				"public.ecg_samples", "public.state_of_mind", "public.medication_dose_events", "public.activity_summaries",
+				"public.aggregate_series", "public.aggregate_samples", "public.metric_daily", "public.workout_route_points",
+				"public.workout_series_points", "public.family_record_identity", "public.family_snapshot_identity",
+				"public.family_source_profiles", "auth.accounts", "auth.sessions", "auth.oauth_grants", "auth.api_credentials",
+			} {
+				var value int
+				err := store.pool.QueryRow(ctx, "SELECT 1 FROM "+relation+" LIMIT 1").Scan(&value)
+				var denied *pgconn.PgError
+				if !errors.As(err, &denied) || denied.Code != "42501" {
+					t.Fatalf("API database role could read %s directly: %v", relation, err)
+				}
 			}
 		})
 		t.Run("catalog cache follows credential scope", func(t *testing.T) {

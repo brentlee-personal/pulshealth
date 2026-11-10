@@ -114,6 +114,15 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, err, "export")
 		return
 	}
+	check, ok := ctx.Value(readRecheckKey{}).(func(context.Context) error)
+	if !ok {
+		s.writeStoreError(w, errAPICredential, "export")
+		return
+	}
+	if err := check(ctx); err != nil {
+		s.writeStoreError(w, err, "export")
+		return
+	}
 
 	// The slot is taken here — after everything that can 400, before the
 	// first byte — and held to the last one. A rejected request must not
@@ -150,6 +159,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		err = dataset.Rows(ctx, func(values []any) error {
+			if rows%exportFlushRows == 0 {
+				if err := check(ctx); err != nil {
+					return err
+				}
+			}
 			if err := encoder.Row(values); err != nil {
 				return err
 			}
@@ -159,6 +173,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		})
+	}
+	if err == nil {
+		err = check(ctx)
 	}
 	if err == nil {
 		err = flush(encoder, out)
