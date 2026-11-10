@@ -35,7 +35,7 @@ export async function requestPasswordReset(email: string, ip: string): Promise<{
     if (!ipAllowed || !emailAllowed) return null;
     const accounts = await q<{ id: string; email: string; password_hash: string }>(
       `SELECT id::text, email, password_hash FROM auth.accounts
-       WHERE email = $1 AND disabled_at IS NULL AND password_hash IS NOT NULL
+       WHERE email = $1 AND auth.personal_account_allowed(id)
        FOR UPDATE`, [email],
     );
     const account = accounts[0];
@@ -62,7 +62,7 @@ export async function usablePasswordReset(token: string): Promise<boolean> {
   const hash = tokenHash(token);
   if (!hash) return false;
   return (await query(`SELECT 1 FROM auth.password_resets r JOIN auth.accounts a ON a.id = r.account_id
-    WHERE r.token_hash = $1 AND r.expires_at > now() AND a.disabled_at IS NULL
+    WHERE r.token_hash = $1 AND r.expires_at > now() AND auth.personal_account_allowed(a.id)
       AND a.password_hash = r.password_hash AND a.password_changed_at IS NOT DISTINCT FROM r.password_changed_at
       `, [hash])).length > 0;
 }
@@ -74,7 +74,7 @@ export async function completePasswordReset(token: string, passwordHash: string)
   return transaction(async (q) => {
     const accounts = await q<{ id: string }>(`SELECT a.id::text FROM auth.accounts a
       WHERE a.id = (SELECT account_id FROM auth.password_resets WHERE token_hash = $1)
-        AND a.disabled_at IS NULL FOR UPDATE`, [hash]);
+        AND auth.personal_account_allowed(a.id) FOR UPDATE`, [hash]);
     if (!accounts[0]) return false;
     const accountId = accounts[0].id;
     const used = await q(`DELETE FROM auth.password_resets r USING auth.accounts a

@@ -107,6 +107,25 @@ describe.skipIf(!databases.available || !apiUrl)("personal API credential author
     }
   });
 
+  it("keeps a stored legacy shared account sealed without an environment flag", async () => {
+    const cookie = await createSession(accountA, { userAgent: null, ip: null });
+    const sessionId = tokenHash(cookie);
+    if (!sessionId) throw new Error("Synthetic session token is invalid");
+    const previous = (await admin.query("SELECT demo_user_id FROM auth.device_pairing_policy WHERE singleton")).rows[0].demo_user_id;
+    try {
+      const issued = await createAPICredential(signer, { kind: "session", sessionId, permissions: narrow });
+      if (!issued) throw new Error("Synthetic personal credential was not issued");
+      await admin.query("UPDATE auth.device_pairing_policy SET demo_user_id=$1 WHERE singleton", [members[0]]);
+      expect(await findSession(cookie)).toBeNull();
+      expect(await createAPICredential(signer, { kind: "session", sessionId, permissions: narrow })).toBeNull();
+      expect(await resolve(issued.token)).toHaveLength(0);
+      expect((await admin.query("SELECT 1 FROM public.users WHERE id=$1", [members[0]])).rowCount).toBe(1);
+    } finally {
+      await admin.query("UPDATE auth.device_pairing_policy SET demo_user_id=$1 WHERE singleton", [previous]);
+      await admin.query("DELETE FROM auth.sessions WHERE id=$1", [sessionId]);
+    }
+  });
+
   it("stops an issued credential when its session no longer has personal sign-in proof", async () => {
     const cookie = await createSession(accountA, { userAgent: null, ip: null });
     const sessionId = tokenHash(cookie);

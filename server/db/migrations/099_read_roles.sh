@@ -753,10 +753,11 @@ if [[ "$(psql -X -q -tA --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                  AND to_regprocedure('auth.reinvite_new_member(bytea,uuid,bytea,integer)') IS NOT NULL
                  AND to_regclass('auth.api_credentials') IS NOT NULL
                  AND to_regprocedure('api.read_scope()') IS NOT NULL
+                 AND to_regprocedure('auth.personal_account_allowed(uuid)') IS NOT NULL
                  AND to_regclass('auth.oauth_grants') IS NOT NULL
                  AND to_regclass('auth.account_deletions') IS NOT NULL
                  AND to_regclass('auth.password_resets') IS NOT NULL")" != t ]]; then
-  echo "099_read_roles: required account migrations through 045_personal_api_views.sql are not applied yet; skipping the web_app role."
+  echo "099_read_roles: required account migrations through 047_personal_account_eligibility.sql are not applied yet; skipping the web_app role."
   exit 0
 fi
 
@@ -887,6 +888,7 @@ GRANT INSERT ON TABLE auth.api_credentials TO web_app;
 -- web_app gets EXECUTE on exactly these and on no other function of its own
 -- (PostgreSQL's default PUBLIC EXECUTE covers built-ins like time_bucket).
 GRANT EXECUTE ON FUNCTION
+  auth.personal_account_allowed(uuid),
   auth.invite_new_member(bytea, text, boolean, integer),
   auth.reinvite_new_member(bytea, uuid, bytea, integer),
   auth.approve_signup(bytea, uuid),
@@ -1077,6 +1079,7 @@ BEGIN
   -- Extensions' own functions are theirs to answer for.
   IF EXISTS (
     WITH expected(signature) AS (VALUES
+      ('auth.personal_account_allowed(uuid)'),
       ('auth.invite_new_member(bytea,text,boolean,integer)'),
       ('auth.reinvite_new_member(bytea,uuid,bytea,integer)'),
       ('auth.approve_signup(bytea,uuid)'),

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { requireIntegrationDatabases } from "./integrationEnv";
 import { requestPasswordReset, completePasswordReset, usablePasswordReset } from "./accounts/recovery";
 import { createSession, findSession, tokenHash } from "./accounts/session";
+import { findAccountForLogin, finishPasswordLogin } from "./accounts/store";
 const { webUrl, adminUrl } = requireIntegrationDatabases();
 const user = randomUUID();
 const email = `${user}@example.com`;
@@ -47,14 +48,27 @@ describe.skipIf(!webUrl || !adminUrl)("password recovery (integration)", () => {
     expect(await completePasswordReset(reset!.token, "expired")).toBe(false);
     expect(await requestPasswordReset(email, `another:${user}`)).toBeNull();
   });
-  it("never issues a link for unknown, disabled or demo accounts", async () => {
+  it("never issues a link for unknown, disabled or stored legacy shared accounts", async () => {
     expect(await requestPasswordReset(`missing-${email}`, `test:${user}`)).toBeNull();
     await admin.query("DELETE FROM auth.password_reset_limits WHERE key=$1", [createHash("sha256").update(`email:${email}`).digest()]);
     await admin.query("UPDATE auth.accounts SET disabled_at=now() WHERE id=$1", [accountId]);
     expect(await requestPasswordReset(email, `test:${user}`)).toBeNull();
     await admin.query("UPDATE auth.accounts SET disabled_at=NULL WHERE id=$1", [accountId]);
-    process.env.WEB_DEMO_USER = user;
-    try { expect(await requestPasswordReset(email, `test:${user}`)).toBeNull(); }
-    finally { delete process.env.WEB_DEMO_USER; }
+    const account = await findAccountForLogin(email);
+    if (!account) throw new Error("Synthetic personal account is unavailable");
+    const reset = await requestPasswordReset(email, `test:${user}`);
+    if (!reset) throw new Error("Synthetic personal reset was not issued");
+    const previous = (await admin.query("SELECT demo_user_id FROM auth.device_pairing_policy WHERE singleton")).rows[0].demo_user_id;
+    await admin.query("UPDATE auth.device_pairing_policy SET demo_user_id=$1 WHERE singleton", [user]);
+    try {
+      expect(await requestPasswordReset(email, `test:${user}`)).toBeNull();
+      expect(await findAccountForLogin(email)).toBeNull();
+      expect(await finishPasswordLogin(account, null, { ip: null, userAgent: null }, null)).toBeNull();
+      expect(await usablePasswordReset(reset.token)).toBe(false);
+      expect(await completePasswordReset(reset.token, "not-personal")).toBe(false);
+      expect((await admin.query("SELECT password_hash FROM auth.accounts WHERE id=$1", [accountId])).rows[0].password_hash).toBe(account.passwordHash);
+    } finally {
+      await admin.query("UPDATE auth.device_pairing_policy SET demo_user_id=$1 WHERE singleton", [previous]);
+    }
   });
 });

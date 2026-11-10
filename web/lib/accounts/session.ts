@@ -91,6 +91,7 @@ export async function findSession(token: string | null | undefined, touch = fals
        JOIN auth.accounts a ON a.id = s.account_id
       WHERE s.id = $1
         AND s.purpose = 'personal'
+        AND auth.personal_account_allowed(a.id)
         AND s.expires_at > now()
         AND s.created_at > now() - make_interval(days => $2)
         AND a.disabled_at IS NULL

@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       const rows = await q<{ account_id: string }>(
         `DELETE FROM auth.native_handoffs h USING auth.accounts a, auth.sessions s
           WHERE h.code_hash = $1 AND h.challenge = $2 AND h.expires_at > now()
-            AND a.id = h.account_id AND a.disabled_at IS NULL AND a.password_hash IS NOT NULL
+            AND a.id = h.account_id AND auth.personal_account_allowed(a.id)
             AND s.id = h.source_session AND s.account_id = a.id
             AND s.purpose = 'personal' AND s.expires_at > now() AND s.created_at > now() - interval '90 days'
           RETURNING h.account_id::text`, [tokenHash(code), challenge]);

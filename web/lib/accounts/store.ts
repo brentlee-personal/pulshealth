@@ -28,7 +28,7 @@ export async function findAccountForLogin(email: string): Promise<LoginAccount |
   const rows = await query<{ id: string; user_id: string; password_hash: string }>(
     `SELECT id::text, user_id::text, password_hash
        FROM auth.accounts
-      WHERE email = $1 AND disabled_at IS NULL AND password_hash IS NOT NULL`,
+      WHERE email = $1 AND auth.personal_account_allowed(id)`,
     [email],
   );
   const row = rows[0];
@@ -57,7 +57,7 @@ export async function finishPasswordLogin(
 ): Promise<string | null> {
   return transaction(async (q) => {
     const rows = await q(
-      "SELECT 1 FROM auth.accounts WHERE id = $1 AND password_hash = $2 AND disabled_at IS NULL FOR UPDATE",
+      "SELECT 1 FROM auth.accounts WHERE id = $1 AND password_hash = $2 AND auth.personal_account_allowed(id) FOR UPDATE",
       [account.id, account.passwordHash],
     );
     if (!rows.length) return null;

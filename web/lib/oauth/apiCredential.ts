@@ -57,7 +57,8 @@ export async function createAPICredential(
                 '1'::text AS authorization_version,
                 floor(extract(epoch FROM least(s.expires_at,s.created_at+interval '90 days')))::bigint::text AS parent_expires_at
            FROM auth.sessions s JOIN auth.accounts a ON a.id=s.account_id
-          WHERE s.id=$1 AND s.purpose='personal' AND s.expires_at>statement_timestamp() AND s.created_at>statement_timestamp()-interval '90 days'
+          WHERE s.id=$1 AND s.purpose='personal' AND auth.personal_account_allowed(a.id)
+            AND s.expires_at>statement_timestamp() AND s.created_at>statement_timestamp()-interval '90 days'
             AND a.disabled_at IS NULL AND a.password_hash IS NOT NULL
           FOR SHARE OF s,a`, [request.sessionId],
       );

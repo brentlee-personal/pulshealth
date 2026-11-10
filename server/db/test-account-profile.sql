@@ -15,7 +15,7 @@ BEGIN
   END IF;
   INSERT INTO public.users(id, name) VALUES (first_user, 'Before'), (other_user, 'Untouched');
   INSERT INTO auth.accounts(user_id, email, password_hash) VALUES (first_user, old_email, 'test-hash') RETURNING id INTO first_account;
-  INSERT INTO auth.sessions(id, account_id, expires_at) VALUES (session_hash, first_account, now() + interval '1 day');
+  INSERT INTO auth.sessions(id, account_id, expires_at, purpose) VALUES (session_hash, first_account, now() + interval '1 day', 'personal');
   PERFORM auth.set_my_profile(session_hash, 'After', old_email, '2000-02-29', 'female', NULL);
   IF (SELECT name FROM public.users WHERE id = first_user) <> 'After'
      OR (SELECT dob FROM public.users WHERE id = first_user) <> '2000-02-29'::date
