@@ -90,6 +90,9 @@ type exportDataset struct {
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if !requireAPIPermission(w, r, "data:export", nil, nil, nil) {
+		return
+	}
 	// The client's own context, kept to tell a hang-up from the ceiling.
 	client := r.Context()
 	ctx, cancel := context.WithTimeout(client, exportMaxDuration)
@@ -283,6 +286,9 @@ func (s *Server) exportDailyMetrics(r *http.Request) (*exportDataset, error) {
 	if err := capExportRange(filters.Start, filters.End, maxExportRange); err != nil {
 		return nil, err
 	}
+	if err := apiPermission(r.Context(), "data:export", filters.Types, &filters.Start, &filters.End); err != nil {
+		return nil, err
+	}
 	metrics, err := s.store.DailyMetrics(r.Context(), s.requestUser(r), filters)
 	if err != nil {
 		return nil, err
@@ -314,6 +320,9 @@ func (s *Server) exportSamples(r *http.Request) (*exportDataset, error) {
 	filters, err := sampleTypeAndRange(r)
 	if err != nil {
 		return nil, asBadRequest(err)
+	}
+	if err := apiPermission(r.Context(), "data:export", []string{filters.Type}, &filters.Start, &filters.End); err != nil {
+		return nil, err
 	}
 	// Resolve the type before the response starts, so an identifier the
 	// database has never seen is a 400 and not a one-line file.
@@ -348,6 +357,9 @@ func (s *Server) exportWorkouts(r *http.Request) (*exportDataset, error) {
 	if err := capExportRange(start, end, maxExportRange); err != nil {
 		return nil, err
 	}
+	if err := apiPermission(r.Context(), "data:export", []string{"HKWorkoutTypeIdentifier"}, &start, &end); err != nil {
+		return nil, err
+	}
 	// Unlike GET /v1/workouts the range is required and the whole of it is
 	// returned: an export is bounded by its range, not by a page size.
 	filters := WorkoutFilters{Start: &start, End: &end, ActivityType: r.URL.Query().Get("activityType")}
@@ -378,6 +390,9 @@ func (s *Server) exportSleep(r *http.Request) (*exportDataset, error) {
 		return nil, asBadRequest(err)
 	}
 	if err := capExportRange(start, end, maxExportRange); err != nil {
+		return nil, err
+	}
+	if err := apiPermission(r.Context(), "data:export", []string{sleepTypeIdentifier}, &start, &end); err != nil {
 		return nil, err
 	}
 	nights, err := s.store.SleepDaily(r.Context(), s.requestUser(r), start, end)
@@ -418,6 +433,9 @@ func (s *Server) exportActivity(r *http.Request) (*exportDataset, error) {
 	if err := capExportRange(start, end, maxExportRange); err != nil {
 		return nil, err
 	}
+	if err := apiPermission(r.Context(), "data:export", []string{"HKActivitySummaryTypeIdentifier"}, &start, &end); err != nil {
+		return nil, err
+	}
 	days, err := s.store.ActivitySummary(r.Context(), s.requestUser(r), start, end)
 	if err != nil {
 		return nil, err
@@ -450,6 +468,9 @@ func (s *Server) exportStateOfMind(r *http.Request) (*exportDataset, error) {
 		return nil, asBadRequest(err)
 	}
 	if err := capExportRange(start, end, maxExportRange); err != nil {
+		return nil, err
+	}
+	if err := apiPermission(r.Context(), "data:export", []string{"HKDataTypeIdentifierStateOfMind"}, &start, &end); err != nil {
 		return nil, err
 	}
 	entries, err := s.store.StateOfMind(r.Context(), s.requestUser(r), start, end)

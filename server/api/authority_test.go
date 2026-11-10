@@ -200,3 +200,31 @@ func TestAPIAuthorityStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAPIPermissionBounds(t *testing.T) {
+	var claims apiClaims
+	if err := strictAuthorityJSON([]byte(apiVectorClaims), &claims); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), apiAuthorityKey{}, &apiAuthority{Principal: claims.Principal})
+	from, _ := time.Parse(time.RFC3339Nano, "2026-01-01T00:00:00.000000001Z")
+	until, _ := time.Parse(time.RFC3339Nano, "2026-02-01T00:00:00Z")
+	if err := apiPermission(ctx, "metrics:read", []string{"HKQuantityTypeIdentifierStepCount"}, &from, &until); err != nil {
+		t.Fatal("the exact half-open signed range was refused")
+	}
+	before := from.Add(-time.Nanosecond)
+	after := until.Add(time.Nanosecond)
+	for name, err := range map[string]error{
+		"missing authority": apiPermission(t.Context(), "metrics:read", nil, nil, nil),
+		"operation":         apiPermission(ctx, "samples:read", []string{"HKQuantityTypeIdentifierStepCount"}, &from, &until),
+		"type":              apiPermission(ctx, "metrics:read", []string{"HKQuantityTypeIdentifierHeartRate"}, &from, &until),
+		"lower nanosecond":  apiPermission(ctx, "metrics:read", nil, &before, &until),
+		"upper nanosecond":  apiPermission(ctx, "metrics:read", nil, &from, &after),
+		"empty range":       apiPermission(ctx, "metrics:read", nil, &from, &from),
+		"reverse range":     apiPermission(ctx, "metrics:read", nil, &until, &from),
+	} {
+		if !errors.Is(err, errAPIScope) {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}

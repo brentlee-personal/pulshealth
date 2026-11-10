@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -25,6 +26,7 @@ import (
 var (
 	errAPICredential = errors.New("invalid personal API credential")
 	errAPIAuthority  = errors.New("personal authorization unavailable")
+	errAPIScope      = errors.New("outside personal permission")
 	apiBase64        = base64.RawURLEncoding.Strict()
 	apiKeyID         = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	apiUTC           = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$`)
@@ -63,6 +65,34 @@ type apiAuthority struct {
 }
 
 type apiAuthorityKey struct{}
+
+func apiPermission(ctx context.Context, operation string, types []string, start, end *time.Time) error {
+	authority, ok := ctx.Value(apiAuthorityKey{}).(*apiAuthority)
+	if !ok || authority == nil || !slices.Contains(authority.Principal.AllowedOperations, operation) {
+		return errAPIScope
+	}
+	p := authority.Principal
+	for _, recordType := range types {
+		if !slices.Contains(p.AllowedTypes, recordType) {
+			return errAPIScope
+		}
+	}
+	from, e1 := time.Parse(time.RFC3339Nano, p.AllowedTimeRange.From)
+	until, e2 := time.Parse(time.RFC3339Nano, p.AllowedTimeRange.Until)
+	if e1 != nil || e2 != nil || (start != nil && (start.Before(from) || !start.Before(until))) ||
+		(end != nil && (end.After(until) || !from.Before(*end))) || (start != nil && end != nil && !start.Before(*end)) {
+		return errAPIScope
+	}
+	return nil
+}
+
+func requireAPIPermission(w http.ResponseWriter, r *http.Request, operation string, types []string, start, end *time.Time) bool {
+	if apiPermission(r.Context(), operation, types, start, end) != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "outside personal permission"})
+		return false
+	}
+	return true
+}
 
 type apiAuthorityConfig struct {
 	Issuer        string

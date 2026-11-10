@@ -492,6 +492,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireAPIPermission(w, r, "samples:read", []string{"puls.v1.profile"}, nil, nil) {
+		return
+	}
 	profile, err := s.store.Profile(r.Context(), s.requestUser(r))
 	if err != nil {
 		s.writeStoreError(w, err, "profile")
@@ -512,6 +515,10 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 // is still served — up to catalogMaxStale — while one background refresh
 // replaces it (see refreshCatalogTypes).
 func (s *Server) handleCatalogTypes(w http.ResponseWriter, r *http.Request) {
+	if apiPermission(r.Context(), "metrics:read", nil, nil, nil) != nil &&
+		!requireAPIPermission(w, r, "samples:read", nil, nil, nil) {
+		return
+	}
 	user := s.requestUser(r)
 	if types, stale, ok := s.cachedCatalogTypes(user, time.Now()); ok {
 		if stale {
@@ -537,6 +544,9 @@ func (s *Server) handleLatestMetrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !requireAPIPermission(w, r, "metrics:read", types, nil, nil) {
+		return
+	}
 	metrics, err := s.store.LatestMetrics(r.Context(), s.requestUser(r), types)
 	if err != nil {
 		s.writeStoreError(w, err, "latest metrics")
@@ -549,6 +559,9 @@ func (s *Server) handleDailyMetrics(w http.ResponseWriter, r *http.Request) {
 	filters, err := dailyFiltersFromRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !requireAPIPermission(w, r, "metrics:read", filters.Types, &filters.Start, &filters.End) {
 		return
 	}
 	metrics, err := s.store.DailyMetrics(r.Context(), s.requestUser(r), filters)
@@ -578,6 +591,9 @@ func (s *Server) handleActivitySummary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !requireAPIPermission(w, r, "metrics:read", []string{"HKActivitySummaryTypeIdentifier"}, &start, &end) {
+		return
+	}
 	days, err := s.store.ActivitySummary(r.Context(), s.requestUser(r), start, end)
 	if err != nil {
 		s.writeStoreError(w, err, "activity summary")
@@ -590,6 +606,9 @@ func (s *Server) handleWorkouts(w http.ResponseWriter, r *http.Request) {
 	filters, err := workoutFiltersFromRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !requireAPIPermission(w, r, "metrics:read", []string{"HKWorkoutTypeIdentifier"}, filters.Start, filters.End) {
 		return
 	}
 	workouts, err := s.store.Workouts(r.Context(), s.requestUser(r), filters)
@@ -607,6 +626,9 @@ func (s *Server) handleWorkout(w http.ResponseWriter, r *http.Request) {
 	uuid := r.PathValue("uuid")
 	if !isUUID(uuid) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workout uuid"})
+		return
+	}
+	if !requireAPIPermission(w, r, "metrics:read", []string{"HKWorkoutTypeIdentifier"}, nil, nil) {
 		return
 	}
 	workout, err := s.store.Workout(r.Context(), s.requestUser(r), uuid)
@@ -627,6 +649,9 @@ func (s *Server) handleSleepDaily(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !requireAPIPermission(w, r, "metrics:read", []string{sleepTypeIdentifier}, &start, &end) {
+		return
+	}
 	nights, err := s.store.SleepDaily(r.Context(), s.requestUser(r), start, end)
 	if err != nil {
 		s.writeStoreError(w, err, "sleep")
@@ -639,6 +664,9 @@ func (s *Server) handleSamples(w http.ResponseWriter, r *http.Request) {
 	filters, err := sampleFiltersFromRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !requireAPIPermission(w, r, "samples:read", []string{filters.Type}, &filters.Start, &filters.End) {
 		return
 	}
 	page, err := s.store.Samples(r.Context(), s.requestUser(r), filters)
@@ -660,6 +688,9 @@ func (s *Server) handleWorkoutSeries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !requireAPIPermission(w, r, "samples:read", []string{"HKWorkoutTypeIdentifier", "puls.v1.series"}, nil, nil) {
+		return
+	}
 	series, err := s.store.WorkoutSeries(r.Context(), s.requestUser(r), uuid, types, maxPoints)
 	if err != nil {
 		s.writeStoreError(w, err, "workout series", "uuid", uuid)
@@ -678,6 +709,9 @@ func (s *Server) handleStateOfMind(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if !requireAPIPermission(w, r, "samples:read", []string{"HKDataTypeIdentifierStateOfMind"}, &start, &end) {
+		return
+	}
 	entries, err := s.store.StateOfMind(r.Context(), s.requestUser(r), start, end)
 	if err != nil {
 		s.writeStoreError(w, err, "state of mind")
@@ -693,6 +727,10 @@ func (s *Server) handleStateOfMind(w http.ResponseWriter, r *http.Request) {
 // act on; anything else is logged and answered with a generic 500. attrs
 // are extra log fields.
 func (s *Server) writeStoreError(w http.ResponseWriter, err error, what string, attrs ...any) {
+	if errors.Is(err, errAPIScope) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "outside personal permission"})
+		return
+	}
 	var reqErr *requestError
 	if errors.As(err, &reqErr) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": reqErr.Error()})

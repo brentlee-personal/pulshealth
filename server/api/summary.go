@@ -580,6 +580,9 @@ func fmtMinutes(minutes float64) string {
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
+	if !requireAPIPermission(w, r, "metrics:read", nil, nil, nil) {
+		return
+	}
 	q := r.URL.Query()
 	_, days, err := summaryRange(q.Get("range"))
 	if err != nil {
