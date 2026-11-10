@@ -261,6 +261,13 @@ Migration 041 expires old unused invitation links. Reissue an invitation for
 a fresh member; existing accounts use owner-verified recovery. Unclaimed
 legacy health data stays sealed, with no automatic email or UUID mapping.
 
+Migration 043 also expires unused links created by the older approval and
+resend paths. Every approval, repeated approval and resend now allocates a
+fresh member. An administrator's live session is checked in the database
+before resending. Existing health records are not attached to the new
+invitation. This is not account recovery; an existing account still requires
+its owner's recovery proof.
+
 **Signing in.** `/login`, `/invite/<token>`, their two POST endpoints,
 `/api/auth/logout`, `/demo` (a 404 unless the demo below is on), build
 assets, `/api/healthz` and (with OAuth on) the OAuth machine endpoints below

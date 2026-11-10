@@ -838,10 +838,11 @@ if [[ "$(psql -X -q -tA --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                  AND to_regprocedure('auth.purge_user(bytea,uuid)') IS NOT NULL
                  AND to_regprocedure('auth.decline_signups(bytea,uuid[])') IS NOT NULL
                  AND to_regprocedure('auth.invite_new_member(bytea,text,boolean,integer)') IS NOT NULL
+                 AND to_regprocedure('auth.reinvite_new_member(bytea,uuid,bytea,integer)') IS NOT NULL
                  AND to_regclass('auth.oauth_grants') IS NOT NULL
                  AND to_regclass('auth.account_deletions') IS NOT NULL
                  AND to_regclass('auth.password_resets') IS NOT NULL")" != t ]]; then
-  echo "099_read_roles: 015_web_accounts.sql, 016_web_signups.sql, 018_web_accounts_hardening.sql or 019_oauth.sql is not applied yet; skipping the web_app role."
+  echo "099_read_roles: required account migrations through 043_fresh_approval_invitations.sql are not applied yet; skipping the web_app role."
   exit 0
 fi
 
@@ -971,6 +972,7 @@ TO web_app;
 -- (PostgreSQL's default PUBLIC EXECUTE covers built-ins like time_bucket).
 GRANT EXECUTE ON FUNCTION
   auth.invite_new_member(bytea, text, boolean, integer),
+  auth.reinvite_new_member(bytea, uuid, bytea, integer),
   auth.approve_signup(bytea, uuid),
   auth.set_account_disabled(bytea, uuid, boolean),
   auth.purge_user(bytea, uuid),
@@ -1159,6 +1161,7 @@ BEGIN
   IF EXISTS (
     WITH expected(signature) AS (VALUES
       ('auth.invite_new_member(bytea,text,boolean,integer)'),
+      ('auth.reinvite_new_member(bytea,uuid,bytea,integer)'),
       ('auth.approve_signup(bytea,uuid)'),
       ('auth.set_account_disabled(bytea,uuid,boolean)'),
       ('auth.purge_user(bytea,uuid)'),

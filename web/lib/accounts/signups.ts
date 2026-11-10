@@ -181,9 +181,6 @@ export async function approveSignup(session: Buffer, adminAccountId: string, req
       "SELECT email, name FROM auth.signup_requests WHERE id = $1::uuid",
       [requestId],
     );
-    // A re-approval reuses the user an unused earlier approval made; its old
-    // link stops working, so only the newest email counts.
-    await q("UPDATE auth.invites SET expires_at = now() WHERE user_id = $1::uuid AND accepted_at IS NULL AND expires_at > now()", [userId]);
     await q(
       `INSERT INTO auth.invites (token_hash, user_id, email, created_by, expires_at)
        VALUES ($1, $2::uuid, $3, $4::uuid, now() + make_interval(days => $5))`,
@@ -282,28 +279,14 @@ export async function listUnusedApprovals(): Promise<UnusedApproval[]> {
   return rows.map((r) => ({ userId: r.user_id, email: r.email, name: r.name, invitedAt: r.invited_at.getTime() }));
 }
 
-/** A fresh invite for an approved person who never used theirs; earlier links stop working. */
-export async function reinvite(adminAccountId: string, userId: string): Promise<Approval | null> {
+/** A resend creates a new member; the earlier member's data remains sealed. */
+export async function reinvite(session: Buffer, userId: string): Promise<Approval | null> {
   const inviteToken = newToken();
-  return transaction(async (q) => {
-    const [row] = await q<{ email: string; name: string }>(
-      `SELECT i.email, coalesce((SELECT r.name FROM auth.signup_requests r WHERE r.user_id = i.user_id
-                                  ORDER BY r.decided_at DESC LIMIT 1), '') AS name
-         FROM auth.invites i
-         JOIN auth.self_service_users ss ON ss.user_id = i.user_id
-        WHERE i.user_id = $1::uuid AND NOT EXISTS (SELECT 1 FROM auth.accounts a WHERE a.user_id = i.user_id)
-        ORDER BY i.created_at DESC LIMIT 1`,
-      [userId],
-    );
-    if (!row) return null;
-    await q("UPDATE auth.invites SET expires_at = now() WHERE user_id = $1::uuid AND accepted_at IS NULL AND expires_at > now()", [userId]);
-    await q(
-      `INSERT INTO auth.invites (token_hash, user_id, email, created_by, expires_at)
-       VALUES ($1, $2::uuid, $3, $4::uuid, now() + make_interval(days => $5))`,
-      [tokenHash(inviteToken), userId, row.email, adminAccountId, APPROVAL_INVITE_DAYS],
-    );
-    return { userId, email: row.email, name: row.name, inviteToken };
-  });
+  const [row] = await query<{ user_id: string; email: string; name: string }>(
+    "SELECT * FROM auth.reinvite_new_member($1,$2::uuid,$3,$4)",
+    [session, userId, tokenHash(inviteToken), APPROVAL_INVITE_DAYS * 24],
+  );
+  return row ? { userId: row.user_id, email: row.email, name: row.name, inviteToken } : null;
 }
 
 /**

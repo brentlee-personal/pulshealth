@@ -427,32 +427,34 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     expect(await sqlState(signups.purgeUser(adminSession, approval.userId))).toBe("55000");
   });
 
-  it("lists an approval whose invite was never used, re-invites it, and reuses its user on a second request", async () => {
+  it("lists unused approvals and creates a fresh member for resend and reapproval", async () => {
     const email = `flood1-${tag}@example.com`;
     const [{ id }] = await requestRow(email);
     const adminAccount = (await admin.query("SELECT id::text FROM auth.accounts WHERE email = $1", [ADMIN_EMAIL])).rows[0].id;
     const first = await signups.approveSignup(adminSession, adminAccount, id);
     expect((await signups.listUnusedApprovals()).map((u) => u.userId)).toContain(first.userId);
 
-    const again = await signups.reinvite(adminAccount, first.userId);
-    expect(again?.userId).toBe(first.userId);
+    const again = await signups.reinvite(adminSession, first.userId);
+    expect(again).not.toBeNull();
+    expect(again?.userId).not.toBe(first.userId);
     // The first link stopped working; the new one is the only live invite.
-    const live = await admin.query("SELECT 1 FROM auth.invites WHERE user_id = $1 AND accepted_at IS NULL AND expires_at > now()", [first.userId]);
+    const live = await admin.query("SELECT 1 FROM auth.invites WHERE email = $1 AND accepted_at IS NULL AND expires_at > now()", [email]);
     expect(live.rows).toHaveLength(1);
-    expect(await signups.reinvite(adminAccount, ADMIN_USER)).toBeNull(); // not an unused approval
+    expect(await signups.reinvite(adminSession, ADMIN_USER)).toBeNull(); // not an unused approval
 
-    // Asking again and being approved again lands on the same user, not a second one.
     await signupRoute.POST(post("/api/auth/signup", { email, consent: "yes" }, { ip: "198.51.100.70" }));
     const second = (await requestRow(email)).find((r) => r.status === "pending")!;
     const reapproved = await signups.approveSignup(adminSession, adminAccount, second.id);
-    expect(reapproved.userId).toBe(first.userId);
+    expect([first.userId, again?.userId]).not.toContain(reapproved.userId);
+    expect((await admin.query("SELECT user_id::text FROM auth.invites WHERE email=$1 AND accepted_at IS NULL AND expires_at>now()", [email])).rows)
+      .toEqual([{ user_id: reapproved.userId }]);
 
     // Never used, so it can be purged without disabling anything.
     await signups.purgeUser(adminSession, first.userId);
     expect(await signups.listUnusedApprovals()).not.toContainEqual(expect.objectContaining({ userId: first.userId }));
   });
 
-  for (const mode of ["reinvite", "reapprove"] as const) {
+  for (const mode of ["reinvite", "reapprove"]) {
     it(`${mode} cannot turn an existing unclaimed member's health data into a new invitation`, async () => {
       const email = `${mode}-${tag}@example.com`;
       await signupRoute.POST(post("/api/auth/signup", { email, consent: "yes" }, { ip: mode === "reinvite" ? "203.0.113.241" : "203.0.113.242" }));
@@ -462,9 +464,9 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
       const first = await signups.approveSignup(adminSession, adminAccount, firstRequest.id);
       const workout = randomUUID();
       await admin.query("INSERT INTO workouts(uuid,activity_type,start_ts,end_ts,user_id) VALUES($1,'running',now()-interval '1 hour',now(),$2)", [workout, first.userId]);
-      let issued;
+      let issued: import("./accounts/signups").Approval | null;
       if (mode === "reinvite") {
-        issued = await signups.reinvite(adminAccount, first.userId);
+        issued = await signups.reinvite(adminSession, first.userId);
       } else {
         await signupRoute.POST(post("/api/auth/signup", { email, consent: "yes" }, { ip: "203.0.113.243" }));
         const second = (await requestRow(email)).find((row) => row.status === "pending");
@@ -480,6 +482,8 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
       expect(visible[0].found, "a fresh invitation must not reveal a pre-existing member workout").toBe(false);
       expect(issued.userId).not.toBe(first.userId);
       expect((await admin.query("SELECT uuid FROM workouts WHERE uuid=$1 AND user_id=$2", [workout, first.userId])).rowCount).toBe(1);
+      expect(await sqlState(signups.reinvite(session.id, first.userId))).toBe("42501");
+      expect(await sqlState(signups.reinvite(Buffer.alloc(32, 9), first.userId))).toBe("42501");
     });
   }
 

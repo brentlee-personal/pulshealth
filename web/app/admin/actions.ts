@@ -27,7 +27,7 @@ export async function approveRequest(_prev: ApproveState, form: FormData): Promi
   try {
     const approval =
       form.get("mode") === "reinvite"
-        ? await reinvite(admin.accountId, id)
+        ? await reinvite(admin.id, id)
         : await approveSignup(admin.id, admin.accountId, id);
     if (!approval) return { ok: false, error: "That person already has an account." };
     return await deliver(approval);
