@@ -1241,8 +1241,7 @@ func TestResponseContractJSONShapes(t *testing.T) {
 		t.Fatalf("statisticsDetail avg = %v, want 68", got)
 	}
 
-	// A user who has never synced: numeric counts, an explicit null for
-	// lastSync, and epoch milliseconds for createdAt.
+	// Missing upload metadata is unreported, never invented as zero counts.
 	userJSON := mustMarshal(t, User{UserID: defaultUserID, CreatedAt: timestamp})
 	var userBody map[string]any
 	if err := json.Unmarshal(userJSON, &userBody); err != nil {
@@ -1251,14 +1250,10 @@ func TestResponseContractJSONShapes(t *testing.T) {
 	if got, ok := userBody["createdAt"].(float64); !ok || int64(got) != timestamp {
 		t.Fatalf("createdAt = %#v, want %d", userBody["createdAt"], timestamp)
 	}
-	if value, ok := userBody["lastSync"]; !ok || value != nil {
-		t.Fatalf("lastSync = %#v (present %v), want an explicit null", value, ok)
-	}
-	if got, ok := userBody["batches"].(float64); !ok || got != 0 {
-		t.Fatalf("batches = %#v, want 0", userBody["batches"])
-	}
-	if got, ok := userBody["uploadedSamples"].(float64); !ok || got != 0 {
-		t.Fatalf("uploadedSamples = %#v, want 0", userBody["uploadedSamples"])
+	for _, field := range []string{"lastSync", "batches", "uploadedSamples"} {
+		if value, present := userBody[field]; present {
+			t.Fatalf("unreported metadata %s=%v was present", field, value)
+		}
 	}
 }
 
