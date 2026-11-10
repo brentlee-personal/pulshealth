@@ -104,9 +104,11 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     await (await import("./db")).getHealthPool()?.end();
     if (!admin) return;
     const users = (await admin.query<{ id: string }>(
-      "SELECT DISTINCT user_id::text AS id FROM auth.signup_requests WHERE email LIKE $1 AND user_id IS NOT NULL", [`%-${tag}@example.com`],
+      `SELECT user_id::text AS id FROM auth.signup_requests WHERE email LIKE $1 AND user_id IS NOT NULL
+       UNION SELECT user_id::text FROM auth.invites WHERE email LIKE $1`, [`%-${tag}@example.com`],
     )).rows.map((r) => r.id);
     for (const user of [...users, ADMIN_USER]) {
+      await admin.query("DELETE FROM workouts WHERE user_id = $1", [user]);
       await admin.query("DELETE FROM device_tokens WHERE user_id = $1", [user]);
       await admin.query("DELETE FROM auth.invites WHERE user_id = $1", [user]);
       await admin.query("DELETE FROM auth.signup_requests WHERE user_id = $1", [user]);
@@ -449,6 +451,37 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("sign-up with approval (integration)", (
     await signups.purgeUser(adminSession, first.userId);
     expect(await signups.listUnusedApprovals()).not.toContainEqual(expect.objectContaining({ userId: first.userId }));
   });
+
+  for (const mode of ["reinvite", "reapprove"] as const) {
+    it(`${mode} cannot turn an existing unclaimed member's health data into a new invitation`, async () => {
+      const email = `${mode}-${tag}@example.com`;
+      await signupRoute.POST(post("/api/auth/signup", { email, consent: "yes" }, { ip: mode === "reinvite" ? "203.0.113.241" : "203.0.113.242" }));
+      const firstRequest = (await requestRow(email)).find((row) => row.status === "pending");
+      if (!firstRequest) throw new Error("Synthetic pending request was not created");
+      const adminAccount = (await admin.query<{ id: string }>("SELECT id::text FROM auth.accounts WHERE email=$1", [ADMIN_EMAIL])).rows[0].id;
+      const first = await signups.approveSignup(adminSession, adminAccount, firstRequest.id);
+      const workout = randomUUID();
+      await admin.query("INSERT INTO workouts(uuid,activity_type,start_ts,end_ts,user_id) VALUES($1,'running',now()-interval '1 hour',now(),$2)", [workout, first.userId]);
+      let issued;
+      if (mode === "reinvite") {
+        issued = await signups.reinvite(adminAccount, first.userId);
+      } else {
+        await signupRoute.POST(post("/api/auth/signup", { email, consent: "yes" }, { ip: "203.0.113.243" }));
+        const second = (await requestRow(email)).find((row) => row.status === "pending");
+        if (!second) throw new Error("Synthetic second request was not created");
+        issued = await signups.approveSignup(adminSession, adminAccount, second.id);
+      }
+      if (!issued) throw new Error("Synthetic invitation was not returned");
+      const response = await inviteRoute.POST(post("/api/auth/invite", { token: issued.inviteToken, password: PASSWORD, confirm: PASSWORD }, { ip: "203.0.113.244" }));
+      const session = await (await import("./accounts/session")).findSession(cookieOf(response));
+      if (!session) throw new Error("Synthetic invited account could not sign in");
+      const visible = await (await import("./db")).scoped(session.userId, (q) => q<{ found: boolean }>(
+        "SELECT EXISTS(SELECT 1 FROM workouts WHERE uuid=$1) AS found", [workout]));
+      expect(visible[0].found, "a fresh invitation must not reveal a pre-existing member workout").toBe(false);
+      expect(issued.userId).not.toBe(first.userId);
+      expect((await admin.query("SELECT uuid FROM workouts WHERE uuid=$1 AND user_id=$2", [workout, first.userId])).rowCount).toBe(1);
+    });
+  }
 
   it("prunes decided requests and never-used approvals after 30 days, in the database", async () => {
     const email = `flood2-${tag}@example.com`;
