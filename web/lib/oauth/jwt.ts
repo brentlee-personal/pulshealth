@@ -5,7 +5,7 @@ import { randomBytes, sign, verify } from "node:crypto";
 
 import { ACCESS_TOKEN_SECONDS, OAUTH_SCOPE, type OAuthConfig } from "./config";
 import { type SigningKey } from "./keys";
-import { readPermissions, type ReadPermissions, type ReadOperation } from "./permissions";
+import { readPermissions, type APIPermissions, type ReadPermissions, type ReadOperation } from "./permissions";
 
 export interface GrantAuthorization {
   grantId: string;
@@ -22,6 +22,12 @@ export interface GrantPrincipal {
   allowed_time_range: { from: string; until: string };
   authorization_version: number;
 }
+
+export type APIPrincipal =
+  | (Omit<GrantPrincipal, "credential_kind"> & { credential_kind: "exchange" })
+  | (Omit<GrantPrincipal, "credential_kind" | "allowed_operations"> & { credential_kind: "session"; allowed_operations: APIPermissions["operations"] });
+
+export type APIAssertionClaims = Omit<AccessTokenClaims, "aud" | "principal" | "scope"> & { aud: "family-health-api"; principal: APIPrincipal };
 
 const MAX_ACCESS_TOKEN_BYTES = 16_384;
 
@@ -43,13 +49,13 @@ function header(keyId: string): string {
 }
 
 /** Signs `claims`, serialised in the contract's key order whatever order they came in. */
-export function signAccessToken(claims: AccessTokenClaims, key: SigningKey): string {
+export function signAccessToken(claims: AccessTokenClaims | APIAssertionClaims, key: SigningKey): string {
   const ordered = {
     iss: claims.iss,
     aud: claims.aud,
     sub: claims.sub,
     client_id: claims.client_id,
-    scope: claims.scope,
+    ...("scope" in claims ? { scope: claims.scope } : {}),
     iat: claims.iat,
     exp: claims.exp,
     jti: claims.jti,

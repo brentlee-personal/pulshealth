@@ -29,6 +29,8 @@ const USER = "5ea4d000-0000-4000-8000-000000000001";
 const CHALLENGE = "p_j-Nj_Xa-C0MOoCl6lv9UzGgSvHUvKaouTlEnyXOiE";
 const TOKEN = "R".repeat(43);
 const PERMISSIONS = { operations: ["metrics:read"], record_types: ["HKQuantityTypeIdentifierStepCount"], time_range: { from: "2020-01-01T00:00:00Z", until: "2030-01-01T00:00:00Z" } } satisfies import("./permissions").ReadPermissions;
+const GRANT = { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1,
+  resource: MCP, userId: USER, scope: "health:read", refreshToken: TOKEN } satisfies import("./store").IssuedGrant;
 const PUBLIC_CLIENT = {
   id: CLIENT_ID,
   name: "Claude",
@@ -226,7 +228,7 @@ describe("token endpoint", () => {
   const exchange = { grant_type: "authorization_code", code: TOKEN, redirect_uri: "https://claude.ai/api/mcp/auth_callback", code_verifier: "v".repeat(43), client_id: CLIENT_ID };
 
   it("exchanges a code for a signed access token and a refresh token", async () => {
-    store.exchangeCode.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.exchangeCode.mockResolvedValue({ ok: true, grant: GRANT });
     const { POST } = await import("@/app/oauth/token/route");
     const res = await POST(tokenReq({ ...exchange, resource: MCP }));
     expect(res.status).toBe(200);
@@ -283,7 +285,7 @@ describe("token endpoint", () => {
     const { tokenHash } = await import("../accounts/session");
     const secret = "S".repeat(43);
     store.findClient.mockResolvedValue({ ...PUBLIC_CLIENT, authMethod: "client_secret_basic", secretHash: tokenHash(secret) });
-    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.refreshGrant.mockResolvedValue({ ok: true, grant: GRANT });
     const { POST } = await import("@/app/oauth/token/route");
     const refresh = { grant_type: "refresh_token", refresh_token: TOKEN };
 
@@ -304,12 +306,12 @@ describe("token endpoint", () => {
   });
 
   it("rotates on refresh and refuses a scope the grant does not hold", async () => {
-    store.refreshGrant.mockResolvedValueOnce({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: "N".repeat(43) } });
+    store.refreshGrant.mockResolvedValueOnce({ ok: true, grant: { ...GRANT, refreshToken: "N".repeat(43) } });
     store.refreshGrant.mockResolvedValueOnce({ ok: false, error: "invalid_scope" });
     const { POST } = await import("@/app/oauth/token/route");
     const ok = await POST(tokenReq({ grant_type: "refresh_token", refresh_token: TOKEN, client_id: CLIENT_ID }));
     expect((await ok.json()).refresh_token).toBe("N".repeat(43));
-    expect(store.refreshGrant).toHaveBeenLastCalledWith({ refreshToken: TOKEN, clientId: CLIENT_ID, scope: null, resource: null, configuredResource: MCP });
+    expect(store.refreshGrant).toHaveBeenLastCalledWith({ refreshToken: TOKEN, clientId: CLIENT_ID, scope: null, resource: null });
     const scoped = await POST(tokenReq({ grant_type: "refresh_token", refresh_token: TOKEN, client_id: CLIENT_ID, scope: "health:write" }));
     expect((await scoped.json()).error).toBe("invalid_scope");
   });
@@ -326,7 +328,7 @@ describe("token endpoint", () => {
   it("charges failures to the address, refunds successes and server errors", async () => {
     const { POST } = await import("@/app/oauth/token/route");
     const ip = freshIp();
-    store.refreshGrant.mockResolvedValue({ ok: true, grant: { grantId: "5ea4d000-0000-4000-8000-000000000003", permissions: PERMISSIONS, authorizationVersion: 1, userId: USER, scope: "health:read", refreshToken: TOKEN } });
+    store.refreshGrant.mockResolvedValue({ ok: true, grant: GRANT });
     for (let i = 0; i < 100; i++) {
       expect((await POST(tokenReq({ grant_type: "refresh_token", refresh_token: TOKEN, client_id: CLIENT_ID }, { ip }))).status).toBe(200);
     }

@@ -91,12 +91,12 @@ export async function POST(request: NextRequest) {
       const resource = formParam(form, "resource");
       if (resource === undefined) return oauthError(400, "invalid_request");
       if (!refreshToken || scope === undefined) return oauthError(400, "invalid_request", "refresh_token is required, once");
-      result = await refreshGrant({ refreshToken, clientId: client.id, scope, resource, configuredResource: config.resource });
+      result = await refreshGrant({ refreshToken, clientId: client.id, scope, resource });
     }
     if (!result.ok) return oauthError(400, result.error);
 
     refundAll(tokenFailures, keys);
-    const audience = result.grant.resource ?? config.resource;
+    const audience = result.grant.resource;
     if (!oauthResources(config).includes(audience)) return oauthError(400, "invalid_target");
     const access = issueAccessToken({ ...config, resource: audience }, result.grant.userId, client.id, undefined, {
       grantId: result.grant.grantId, permissions: result.grant.permissions, authorizationVersion: result.grant.authorizationVersion,

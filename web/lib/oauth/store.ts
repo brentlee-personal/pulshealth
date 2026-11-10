@@ -100,7 +100,7 @@ export interface IssuedGrant {
   userId: string;
   scope: string;
   refreshToken: string;
-  resource?: string | null;
+  resource: string;
   permissions: ReadPermissions;
   authorizationVersion: number;
 }
@@ -120,7 +120,7 @@ async function startGrant(
   accountId: string,
   clientId: string,
   scope: string,
-  resource: string | null,
+  resource: string,
   permissions: ReadPermissions,
 ): Promise<{ id: string; refreshToken: string }> {
   const refreshToken = newToken();
@@ -207,11 +207,11 @@ export async function exchangeCode(input: {
     if (!code.account_ok) return { ok: false, error: "invalid_grant" } as const;
 
     await q("UPDATE auth.oauth_codes SET used_at = now() WHERE id = $1", [id]);
-    const grant = await startGrant(q, code.account_id, code.client_id, code.scope, code.resource, permissions);
+    const grant = await startGrant(q, code.account_id, code.client_id, code.scope, audience, permissions);
     await q("UPDATE auth.oauth_codes SET grant_id = $2 WHERE id = $1", [id, grant.id]);
     return {
       ok: true,
-      grant: { grantId: grant.id, userId: code.user_id, scope: code.scope, resource: code.resource, refreshToken: grant.refreshToken, permissions, authorizationVersion: 1 },
+      grant: { grantId: grant.id, userId: code.user_id, scope: code.scope, resource: audience, refreshToken: grant.refreshToken, permissions, authorizationVersion: 1 },
     } as const;
   });
 }
@@ -222,7 +222,7 @@ export async function exchangeCode(input: {
  * away revokes its whole grant: either the client lost track (and must sign
  * in again) or someone else holds a copy.
  */
-export async function refreshGrant(input: { refreshToken: string; clientId: string; scope: string | null; resource?: string | null; configuredResource?: string }): Promise<GrantResult> {
+export async function refreshGrant(input: { refreshToken: string; clientId: string; scope: string | null; resource?: string | null }): Promise<GrantResult> {
   const hash = tokenHash(input.refreshToken);
   if (!hash) return { ok: false, error: "invalid_grant" };
   return transaction(async (q) => {
@@ -256,13 +256,13 @@ export async function refreshGrant(input: { refreshToken: string; clientId: stri
       );
       return { ok: false, error: "invalid_grant", reused: reused.length > 0 } as const;
     }
-    if (grant.client_id !== input.clientId || !grant.live || !grant.account_ok) {
+    if (grant.client_id !== input.clientId || !grant.live || !grant.account_ok || !grant.resource) {
       return { ok: false, error: "invalid_grant" } as const;
     }
     const permissions = readPermissions(grant.permissions);
     const authorizationVersion = Number(grant.authorization_version);
     if (!permissions || !Number.isSafeInteger(authorizationVersion) || authorizationVersion < 1) return { ok: false, error: "invalid_grant" } as const;
-    if (!resourceMatches(input.resource, grant.resource ?? input.configuredResource ?? "")) {
+    if (!resourceMatches(input.resource, grant.resource)) {
       return { ok: false, error: "invalid_target" } as const;
     }
     if (input.scope !== null) {

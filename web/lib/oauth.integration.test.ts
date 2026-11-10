@@ -78,7 +78,7 @@ describe.skipIf(!WEB_URL || !ADMIN_URL)("OAuth for AI assistants (integration)",
     expect(issued.ok).toBe(true);
     if (!issued.ok) throw new Error("exchange failed");
     expect(issued.grant.resource).toBe(resource);
-    const switched = await oauth.refreshGrant({ refreshToken: issued.grant.refreshToken, clientId, scope: null, resource: MCP, configuredResource: MCP });
+    const switched = await oauth.refreshGrant({ refreshToken: issued.grant.refreshToken, clientId, scope: null, resource: MCP });
     expect(switched).toEqual({ ok: false, error: "invalid_target" });
     const refreshed = await oauth.refreshGrant({ refreshToken: issued.grant.refreshToken, clientId, scope: null });
     expect(refreshed.ok && refreshed.grant.resource).toBe(resource);

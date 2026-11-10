@@ -6,6 +6,8 @@ export interface ReadPermissions {
   time_range: { from: string; until: string };
 }
 
+export type APIPermissions = Omit<ReadPermissions, "operations"> & { operations: (ReadOperation | "data:export")[] };
+
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

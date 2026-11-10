@@ -237,6 +237,15 @@ GRANT SELECT ON TABLE
   workout_series_points
 TO api_reader;
 
+DO $$
+BEGIN
+  IF to_regprocedure('auth.resolve_api_credential(bytea)') IS NOT NULL THEN
+    GRANT USAGE ON SCHEMA auth TO api_reader;
+    GRANT EXECUTE ON FUNCTION auth.resolve_api_credential(bytea) TO api_reader;
+  END IF;
+END
+$$;
+
 -- Prove the direct ACL and role configuration are exact before committing.
 -- PUBLIC grants from extensions may still be effective; this assertion makes
 -- sure api_reader itself never receives extra privileges.
@@ -381,6 +390,7 @@ BEGIN
   IF EXISTS (
     WITH expected(nspname, privilege_type, is_grantable) AS (
       VALUES ('public', 'USAGE', false)
+      UNION ALL SELECT 'auth', 'USAGE', false WHERE to_regprocedure('auth.resolve_api_credential(bytea)') IS NOT NULL
     ), actual AS (
       SELECT n.nspname, acl.privilege_type, acl.is_grantable
       FROM pg_namespace n
@@ -418,6 +428,9 @@ BEGIN
     SELECT 1 FROM pg_proc p
     CROSS JOIN LATERAL aclexplode(p.proacl) acl
     WHERE acl.grantee = api_oid
+      AND NOT coalesce(p.oid = to_regprocedure('auth.resolve_api_credential(bytea)')
+        AND p.prosecdef AND p.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']
+        AND acl.privilege_type = 'EXECUTE' AND NOT acl.is_grantable, false)
   ) OR EXISTS (
     SELECT 1 FROM pg_type t
     CROSS JOIN LATERAL aclexplode(t.typacl) acl
@@ -839,10 +852,11 @@ if [[ "$(psql -X -q -tA --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
                  AND to_regprocedure('auth.decline_signups(bytea,uuid[])') IS NOT NULL
                  AND to_regprocedure('auth.invite_new_member(bytea,text,boolean,integer)') IS NOT NULL
                  AND to_regprocedure('auth.reinvite_new_member(bytea,uuid,bytea,integer)') IS NOT NULL
+                 AND to_regclass('auth.api_credentials') IS NOT NULL
                  AND to_regclass('auth.oauth_grants') IS NOT NULL
                  AND to_regclass('auth.account_deletions') IS NOT NULL
                  AND to_regclass('auth.password_resets') IS NOT NULL")" != t ]]; then
-  echo "099_read_roles: required account migrations through 043_fresh_approval_invitations.sql are not applied yet; skipping the web_app role."
+  echo "099_read_roles: required account migrations through 044_personal_api_credentials.sql are not applied yet; skipping the web_app role."
   exit 0
 fi
 
@@ -961,6 +975,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   auth.oauth_clients,
   auth.oauth_grants,
   auth.oauth_codes,
+  auth.api_credentials,
   auth.password_resets,
   auth.password_reset_limits
 TO web_app;
@@ -1075,6 +1090,10 @@ BEGIN
       ('auth', 'oauth_codes', 'INSERT', false),
       ('auth', 'oauth_codes', 'UPDATE', false),
       ('auth', 'oauth_codes', 'DELETE', false),
+      ('auth', 'api_credentials', 'SELECT', false),
+      ('auth', 'api_credentials', 'INSERT', false),
+      ('auth', 'api_credentials', 'UPDATE', false),
+      ('auth', 'api_credentials', 'DELETE', false),
       ('auth', 'password_resets', 'SELECT', false),
       ('auth', 'password_resets', 'INSERT', false),
       ('auth', 'password_resets', 'UPDATE', false),
