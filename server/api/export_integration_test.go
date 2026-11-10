@@ -25,8 +25,8 @@ import (
 // response goes out in several chunks rather than one.
 const exportIntegrationRows = exportFlushRows + 7
 
-func TestIntegrationExportEndpoint(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceExportEndpoint(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
@@ -76,7 +76,7 @@ func TestIntegrationExportEndpoint(t *testing.T) {
 			defaultUserID, ringDay.Format("2006-01-02"), nextRingDay.Format("2006-01-02"))
 	}()
 
-	srv := &Server{store: store, authorize: testAuthorize("export-integration", defaultUserID), log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	srv := &Server{store: referenceHTTPStore{store}, authorize: testAuthorize("export-integration", defaultUserID, quantityType), log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	server := httptest.NewServer(srv.routes())
 	defer server.Close()
 

@@ -32,8 +32,8 @@ type scopeFixture struct {
 	samples     int64
 }
 
-func TestIntegrationReadsAreScopedByUser(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceReadsAreScopedByUser(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
@@ -178,8 +178,8 @@ func TestIntegrationReadsAreScopedByUser(t *testing.T) {
 // Users reads batches, which api_reader gained SELECT on for it, so this is
 // the test that fails as that role if the grant is missing. The full shape
 // with fixtures is checked from TestIntegrationReadsAreScopedByUser.
-func TestIntegrationUsersEndpoint(t *testing.T) {
-	store, ctx, cleanup := integrationStore(t)
+func TestIntegrationReferenceUsersEndpoint(t *testing.T) {
+	store, ctx, cleanup := referenceIntegrationStore(t)
 	defer cleanup()
 
 	users, err := store.Users(ctx, defaultUserID)
@@ -230,7 +230,7 @@ func testUsersEndpoint(t *testing.T, ctx context.Context, store *Store, fixtures
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
 	for _, fixture := range fixtures {
-		response := get(t, &Server{store: store, authorize: testAuthorize("scope-integration", fixture.userID), log: logger})
+		response := get(t, &Server{store: referenceHTTPStore{store}, authorize: testAuthorize("scope-integration", fixture.userID), log: logger})
 		if response.MultiUser || response.Default != fixture.userID || len(response.Users) != 1 || response.Users[0].UserID != fixture.userID {
 			t.Fatalf("response is not restricted to its credential: %+v", response)
 		}

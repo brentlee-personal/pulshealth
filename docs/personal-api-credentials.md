@@ -37,9 +37,27 @@ The updated role script grants the API reader only the resolver's EXECUTE
 privilege in auth; it cannot read the credential table. Historical schema
 baselining can provision the earlier role before this function exists.
 
-This module does not complete Family Health T07. The Go HTTP authenticator
-and Web forwarding still need to switch to these credentials. The API
-reader's old health base-table grants, default identity, shared API bearer,
-derived-query boundaries and streaming checks still require retirement or
-enforcement. Module tests are not HTTP, browser, deployment or real-data
-acceptance. Do not deploy the unfinished branch with family health data.
+The Go HTTP authenticator resolves the opaque bearer, verifies its Ed25519
+assertion with local public keys, and compares the signed principal with
+current storage. Requests also check operation, type and UTC bounds.
+The Web health route creates a separate API credential after checking its
+subject grant. It does not forward that subject or a shared service token.
+
+Migration 045 adds credential-scoped security-barrier views in schema api.
+The api_reader role can select those views, not health base tables or
+Timescale storage relations. Each request opens a read-only READ COMMITTED
+transaction and sets its credential hash locally. Each SQL statement checks
+live authority. Rollback clears the identity before the connection returns
+to the pool, including after request cancellation. Health aggregates use
+scoped raw inputs. Unverified legacy profile and activity-day facts remain
+sealed. This does not erase their stored records.
+
+Integration authorization tests use real api_reader connections, signatures
+and HTTP. Legacy calendar and SQL math tests use the separate read-only
+grafana reference role through REFERENCE_DATABASE_URL. They do not prove
+personal authorization. The fixture writer alone uses ADMIN_DATABASE_URL.
+
+Family Health T07 remains incomplete. Streaming page checks, the full old
+configuration and bootstrap chain, forced Web accounts, browser behavior,
+and final regression and restore checks remain pending. The branch is not
+approved for deployment or real health data.

@@ -450,13 +450,14 @@ jobs:
           DATABASE_URL: postgres://ingest:ci-ingest@127.0.0.1:55432/postgres
         run: go test -race -count=1 -run Integration ./...
 
-      - name: Product API, as the read-only `api_reader` role
+      - name: Product API authorization and read-only reference queries
         working-directory: server/api
         env:
           DATABASE_URL: postgres://api_reader:ci-api@127.0.0.1:55432/postgres
+          REFERENCE_DATABASE_URL: postgres://grafana:ci-grafana@127.0.0.1:55432/postgres
           # Opt-in because they write: fixture rows go in through
-          # ADMIN_DATABASE_URL and are read back through the reader role, so
-          # the grants under test are the ones production uses.
+          # ADMIN_DATABASE_URL. Personal authorization uses api_reader;
+          # legacy calendar and SQL math use the separate read-only reference role.
           PULS_API_WRITE_INTEGRATION_TESTS: "1"
         run: go test -race -count=1 -run Integration ./...
 

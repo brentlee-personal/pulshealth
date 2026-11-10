@@ -219,6 +219,51 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 				t.Fatal("API database role could read a health base table directly")
 			}
 		})
+		t.Run("catalog cache follows credential scope", func(t *testing.T) {
+			heartClaims := claims
+			heartClaims.ID = fixtureUUID("aadd4000", nonce, 1)
+			heartClaims.Principal.CredentialID = heartClaims.ID
+			heartClaims.Principal.AllowedTypes = []string{"HKQuantityTypeIdentifierHeartRate"}
+			heartSecret := make([]byte, 32)
+			if _, err := rand.Read(heartSecret); err != nil {
+				t.Fatal(err)
+			}
+			heartHash := sha256.Sum256(heartSecret)
+			heartPermissions, err := json.Marshal(map[string]any{"operations": heartClaims.Principal.AllowedOperations,
+				"record_types": heartClaims.Principal.AllowedTypes, "time_range": heartClaims.Principal.AllowedTimeRange})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := admin.Exec(ctx, `INSERT INTO auth.api_credentials(id,token_hash,account_id,session_id,permissions,authorization_version,assertion,created_at,expires_at)
+				VALUES($1,$2,$3,$4,$5,1,$6,to_timestamp($7),to_timestamp($8))`, heartClaims.ID, heartHash[:], account, session,
+				heartPermissions, makeAssertion(heartClaims), now, now+120); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _, _ = admin.Exec(ctx, "DELETE FROM auth.api_credentials WHERE id=$1", heartClaims.ID) }()
+			for _, selected := range []struct{ token, identifier string }{
+				{bearer, principal.AllowedTypes[0]},
+				{apiBase64.EncodeToString(heartSecret), heartClaims.Principal.AllowedTypes[0]},
+				{bearer, principal.AllowedTypes[0]},
+			} {
+				request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/catalog/types", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", "Bearer "+selected.token)
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var body struct {
+					Types []CatalogType `json:"types"`
+				}
+				err = json.NewDecoder(response.Body).Decode(&body)
+				response.Body.Close()
+				if response.StatusCode != http.StatusOK || err != nil || len(body.Types) != 1 || body.Types[0].Identifier != selected.identifier {
+					t.Fatal("catalog cache exposed another personal credential's record types")
+				}
+			}
+		})
 		t.Run("transaction identity and revocation", func(t *testing.T) {
 			config := store.pool.Config()
 			config.MaxConns = 1

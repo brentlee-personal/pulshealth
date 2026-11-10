@@ -28,8 +28,8 @@ type summaryFixture struct {
 	steps       float64
 }
 
-func TestIntegrationSummaryIsPerUser(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceSummaryIsPerUser(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
@@ -143,7 +143,7 @@ func TestIntegrationSummaryIsPerUser(t *testing.T) {
 	// Over HTTP, ?user= picks whose page is rendered.
 	t.Run("endpoint", func(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-		srv := &Server{store: store, authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
+		srv := &Server{store: referenceHTTPStore{store}, authorize: func(ctx context.Context, bearer string) (*apiAuthority, error) {
 			return testAuthorize(bearer, bearer)(ctx, bearer)
 		}, log: logger, loc: loc}
 		server := httptest.NewServer(srv.routes())

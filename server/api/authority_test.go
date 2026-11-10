@@ -18,14 +18,19 @@ const apiVectorSeed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031
 const defaultUserID = "5ea4d000-0000-4000-8000-000000000001"
 
 // Handler-only tests inject personal authority; integration authority tests use real signatures and storage.
-func testAuthorize(token, member string) func(context.Context, string) (*apiAuthority, error) {
+func testAuthorize(token, member string, extraTypes ...string) func(context.Context, string) (*apiAuthority, error) {
 	return func(_ context.Context, bearer string) (*apiAuthority, error) {
 		if bearer != token {
 			return nil, errAPICredential
 		}
 		return &apiAuthority{Principal: apiPrincipal{MemberID: strings.ToLower(member), CredentialID: "5ea4d000-0000-4000-8000-000000000002",
 			CredentialKind: "session", AuthorizationVersion: 1, AllowedOperations: []string{"metrics:read", "samples:read", "data:export"},
-			AllowedTypes: []string{"puls.v1.profile"}, AllowedTimeRange: apiTimeRange{From: "1970-01-01T00:00:00Z", Until: "9999-12-31T23:59:59Z"}}}, nil
+			AllowedTypes: append([]string{
+				"puls.v1.profile", "puls.v1.route", "puls.v1.series", "HKWorkoutTypeIdentifier", "HKActivitySummaryTypeIdentifier",
+				"HKQuantityTypeIdentifierStepCount", "HKQuantityTypeIdentifierHeartRate", "HKQuantityTypeIdentifierBodyMass",
+				"HKQuantityTypeIdentifierRunningPower", "HKCategoryTypeIdentifierSleepAnalysis", "HKDataTypeIdentifierStateOfMind",
+				"HKNope", "HKQuantityTypeIdentifierNoSuchThing",
+			}, extraTypes...), AllowedTimeRange: apiTimeRange{From: "1970-01-01T00:00:00Z", Until: "9999-12-31T23:59:59Z"}}}, nil
 	}
 }
 

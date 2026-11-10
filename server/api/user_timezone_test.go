@@ -18,8 +18,8 @@ func TestSummaryUsesReportedAccountZone(t *testing.T) {
 
 // A shared store must keep simultaneous users' zones separate. Include
 // fractional offsets and the spring-forward calendar day.
-func TestIntegrationAccountTimeZones(t *testing.T) {
-	st, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceAccountTimeZones(t *testing.T) {
+	st, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 	instant := time.Date(2080, 3, 10, 6, 30, 0, 0, time.UTC)
 	st.now = func() time.Time { return instant }

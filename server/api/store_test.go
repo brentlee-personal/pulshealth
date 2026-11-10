@@ -13,11 +13,26 @@ import (
 )
 
 func integrationStore(t *testing.T) (*Store, context.Context, func()) {
+	return integrationDatabase(t, "DATABASE_URL")
+}
+
+// Reference queries check calendar and SQL math, not personal authorization.
+func referenceIntegrationStore(t *testing.T) (*Store, context.Context, func()) {
+	store, ctx, cleanup := integrationDatabase(t, "REFERENCE_DATABASE_URL")
+	var role string
+	if err := store.pool.QueryRow(ctx, "SELECT current_user").Scan(&role); err != nil || role != "grafana" {
+		cleanup()
+		t.Fatalf("reference queries require the read-only grafana role, got %q: %v", role, err)
+	}
+	return store, ctx, cleanup
+}
+
+func integrationDatabase(t *testing.T, variable string) (*Store, context.Context, func()) {
 	t.Helper()
 
-	dbURL := os.Getenv("DATABASE_URL")
+	dbURL := os.Getenv(variable)
 	if dbURL == "" {
-		skipIntegration(t, "DATABASE_URL is unset")
+		skipIntegration(t, variable+" is unset")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,12 +72,30 @@ func losAngelesLocation() (*time.Location, error) {
 // fixtures go through ADMIN_DATABASE_URL (the superuser), which falls back
 // to DATABASE_URL so a suite run entirely as the superuser keeps working.
 func writeIntegrationStore(t *testing.T) (*Store, *pgxpool.Pool, context.Context, func()) {
+	return writeIntegrationFixture(t, false)
+}
+
+func writeReferenceIntegrationStore(t *testing.T) (*Store, *pgxpool.Pool, context.Context, func()) {
+	return writeIntegrationFixture(t, true)
+}
+
+type referenceHTTPStore struct{ *Store }
+
+func (st referenceHTTPStore) ReadScope(ctx context.Context, _ *apiAuthority) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
+func writeIntegrationFixture(t *testing.T, reference bool) (*Store, *pgxpool.Pool, context.Context, func()) {
 	t.Helper()
 
 	if os.Getenv("PULS_API_WRITE_INTEGRATION_TESTS") != "1" {
 		skipIntegration(t, "PULS_API_WRITE_INTEGRATION_TESTS is not set to 1, so the tests that write fixture rows do not run")
 	}
-	store, ctx, cleanup := integrationStore(t)
+	open := integrationStore
+	if reference {
+		open = referenceIntegrationStore
+	}
+	store, ctx, cleanup := open(t)
 
 	adminURL := os.Getenv("ADMIN_DATABASE_URL")
 	if adminURL == "" {
@@ -247,8 +280,8 @@ func TestLocalDayRangeRejectsEmptyOrNegativeRange(t *testing.T) {
 	}
 }
 
-func TestIntegrationCatalogTypesEmptyOrLive(t *testing.T) {
-	store, ctx, cleanup := integrationStore(t)
+func TestIntegrationReferenceCatalogTypesEmptyOrLive(t *testing.T) {
+	store, ctx, cleanup := referenceIntegrationStore(t)
 	defer cleanup()
 
 	types, err := store.CatalogTypes(ctx, defaultUserID)
@@ -262,8 +295,8 @@ func TestIntegrationCatalogTypesEmptyOrLive(t *testing.T) {
 	}
 }
 
-func TestIntegrationUnknownLatestMetricIsEmpty(t *testing.T) {
-	store, ctx, cleanup := integrationStore(t)
+func TestIntegrationReferenceUnknownLatestMetricIsEmpty(t *testing.T) {
+	store, ctx, cleanup := referenceIntegrationStore(t)
 	defer cleanup()
 
 	metrics, err := store.LatestMetrics(ctx, defaultUserID, []string{"HKQuantityTypeIdentifierDefinitelyMissingForIntegrationTest"})
@@ -278,8 +311,8 @@ func TestIntegrationUnknownLatestMetricIsEmpty(t *testing.T) {
 	}
 }
 
-func TestIntegrationActivitySummaryEmptyRangeIsNonNil(t *testing.T) {
-	store, ctx, cleanup := integrationStore(t)
+func TestIntegrationReferenceActivitySummaryEmptyRangeIsNonNil(t *testing.T) {
+	store, ctx, cleanup := referenceIntegrationStore(t)
 	defer cleanup()
 
 	start := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -296,8 +329,8 @@ func TestIntegrationActivitySummaryEmptyRangeIsNonNil(t *testing.T) {
 	}
 }
 
-func TestIntegrationActivitySummaryUsesTouchedLocalDays(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceActivitySummaryUsesTouchedLocalDays(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
@@ -340,8 +373,8 @@ func TestIntegrationActivitySummaryUsesTouchedLocalDays(t *testing.T) {
 	}
 }
 
-func TestIntegrationWorkoutsEmptyFilterIsNonNil(t *testing.T) {
-	store, ctx, cleanup := integrationStore(t)
+func TestIntegrationReferenceWorkoutsEmptyFilterIsNonNil(t *testing.T) {
+	store, ctx, cleanup := referenceIntegrationStore(t)
 	defer cleanup()
 
 	start := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -363,8 +396,8 @@ func TestIntegrationWorkoutsEmptyFilterIsNonNil(t *testing.T) {
 	}
 }
 
-func TestIntegrationDailyMetricsFixture(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceDailyMetricsFixture(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	suffix := time.Now().UTC().UnixNano()
@@ -441,8 +474,8 @@ func TestIntegrationDailyMetricsFixture(t *testing.T) {
 	t.Fatalf("aggregate-only type %q missing from catalog", identifier)
 }
 
-func TestIntegrationWorkoutFixture(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceWorkoutFixture(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	suffix := time.Now().UTC().UnixNano()
@@ -591,8 +624,8 @@ func insertSleepSample(
 // "asleep" interval while the Watch logs stages. It crosses local midnight,
 // which is the case wake-up-day attribution has to get right, and a nap the
 // next afternoon must come back as its own row on the same date.
-func TestIntegrationSleepDailyAcrossMidnightFromTwoSources(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceSleepDailyAcrossMidnightFromTwoSources(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
@@ -711,8 +744,8 @@ func TestIntegrationSleepDailyAcrossMidnightFromTwoSources(t *testing.T) {
 	}
 }
 
-func TestIntegrationSamplesQuantityAndCategory(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceSamplesQuantityAndCategory(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	suffix := time.Now().UTC().UnixNano()
@@ -883,8 +916,8 @@ func TestIntegrationSamplesQuantityAndCategory(t *testing.T) {
 	})
 }
 
-func TestIntegrationWorkoutSeriesFiltersAndDownsamples(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceWorkoutSeriesFiltersAndDownsamples(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	suffix := time.Now().UTC().UnixNano()
@@ -989,8 +1022,8 @@ func TestIntegrationWorkoutSeriesFiltersAndDownsamples(t *testing.T) {
 	}
 }
 
-func TestIntegrationStateOfMind(t *testing.T) {
-	store, admin, ctx, cleanup := writeIntegrationStore(t)
+func TestIntegrationReferenceStateOfMind(t *testing.T) {
+	store, admin, ctx, cleanup := writeReferenceIntegrationStore(t)
 	defer cleanup()
 
 	loc, err := losAngelesLocation()
