@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -161,6 +162,45 @@ func TestIntegrationAPIPoolAndStreamRevocation(t *testing.T) {
 		}
 	})
 	for _, dataset := range []string{"samples", "workouts"} {
+		t.Run(dataset+" complete microsecond pages", func(t *testing.T) {
+			server := httptest.NewServer((&Server{store: personal, authorize: resolve, log: slog.New(slog.NewTextHandler(io.Discard, nil))}).routes())
+			defer server.Close()
+			start := time.Date(2026, 1, 14, 0, 0, 0, 0, time.UTC)
+			target := fmt.Sprintf("/v1/export?format=csv&dataset=%s&start=%d&end=%d", dataset, start.UnixMilli(), start.Add(48*time.Hour).UnixMilli())
+			if dataset == "samples" {
+				target += "&type=HKQuantityTypeIdentifierStepCount"
+			}
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+members[0].bearer)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			rows, err := csv.NewReader(response.Body).ReadAll()
+			if err != nil || response.StatusCode != http.StatusOK || len(rows) != 601 {
+				t.Fatalf("complete personal export lost rows: status=%d rows=%d err=%v", response.StatusCode, len(rows), err)
+			}
+			column := -1
+			for index, name := range rows[0] {
+				if name == "uuid" {
+					column = index
+				}
+			}
+			if column < 0 {
+				t.Fatal("export has no UUID column")
+			}
+			unique := make(map[string]bool)
+			for _, row := range rows[1:] {
+				unique[row[column]] = true
+			}
+			if len(unique) != 600 {
+				t.Fatal("microsecond pagination duplicated or omitted records")
+			}
+		})
 		t.Run(dataset+" HTTP revocation", func(t *testing.T) {
 			revoked := make(chan struct{})
 			actual := revokingReadStore{Store: personal, revoke: func() error {

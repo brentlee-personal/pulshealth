@@ -445,6 +445,17 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := context.WithValue(r.Context(), apiAuthorityKey{}, authority)
 		ctx = withRequestUser(ctx, authority.Principal.MemberID)
+		authorize := s.authorize
+		ctx = context.WithValue(ctx, readRecheckKey{}, func(ctx context.Context) error {
+			current, err := authorize(ctx, got)
+			if err != nil {
+				return err
+			}
+			if current == nil || current.TokenHash != authority.TokenHash || !current.Principal.equals(authority.Principal) {
+				return errAPICredential
+			}
+			return nil
+		})
 		ctx, closeScope, err := s.store.ReadScope(ctx, authority)
 		if err != nil {
 			if errors.Is(err, errAPICredential) {
@@ -747,6 +758,15 @@ func (s *Server) handleStateOfMind(w http.ResponseWriter, r *http.Request) {
 // act on; anything else is logged and answered with a generic 500. attrs
 // are extra log fields.
 func (s *Server) writeStoreError(w http.ResponseWriter, err error, what string, attrs ...any) {
+	if errors.Is(err, errAPICredential) {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if errors.Is(err, errAPIAuthority) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "authorization unavailable"})
+		return
+	}
 	if errors.Is(err, errAPIScope) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "outside personal permission"})
 		return

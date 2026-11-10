@@ -10,6 +10,14 @@ import (
 )
 
 type readScopeKey struct{}
+type readRecheckKey struct{}
+
+const readPageSize = 256
+
+type readCursor struct {
+	at time.Time
+	id string
+}
 
 type readQuery interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
@@ -47,5 +55,32 @@ func (st *Store) ReadScope(ctx context.Context, authority *apiAuthority) (contex
 		}
 		return ctx, nil, errAPIAuthority
 	}
+	ctx = context.WithValue(ctx, apiAuthorityKey{}, authority)
 	return context.WithValue(ctx, readScopeKey{}, tx), closeScope, nil
+}
+
+func (st *Store) checkReadScope(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if check, ok := ctx.Value(readRecheckKey{}).(func(context.Context) error); ok {
+		return check(ctx)
+	}
+	authority, ok := ctx.Value(apiAuthorityKey{}).(*apiAuthority)
+	if !ok {
+		return nil
+	}
+	var raw []byte
+	err := st.readDB(ctx).QueryRow(ctx, "SELECT principal FROM auth.resolve_api_credential($1)", authority.TokenHash[:]).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errAPICredential
+	}
+	if err != nil {
+		return errAPIAuthority
+	}
+	var principal apiPrincipal
+	if strictAuthorityJSON(raw, &principal) != nil || !principal.equals(authority.Principal) {
+		return errAPICredential
+	}
+	return nil
 }

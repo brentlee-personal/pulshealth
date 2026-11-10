@@ -171,7 +171,7 @@ func (st *Store) authorizeAPI(ctx context.Context, bearer, issuer, keyFile strin
 	var principalJSON []byte
 	var grantID *string
 	var expiresAt time.Time
-	err = st.pool.QueryRow(ctx, `SELECT assertion, principal, grant_id::text, client_id, expires_at
+	err = st.readDB(ctx).QueryRow(ctx, `SELECT assertion, principal, grant_id::text, client_id, expires_at
 		FROM auth.resolve_api_credential($1)`, hash[:]).Scan(&assertion, &principalJSON, &grantID, &clientID, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errAPICredential

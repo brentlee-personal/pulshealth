@@ -13,7 +13,7 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
-	loc *time.Location
+	loc  *time.Location
 	// The clock the summary's "today" is read from; time.Now outside tests.
 	now func() time.Time
 }
@@ -423,37 +423,80 @@ const workoutSummarySQL = `
 	  AND ($2::timestamptz IS NULL OR w.start_ts >= $2)
 	  AND ($3::timestamptz IS NULL OR w.start_ts < $3)
 	  AND ($4::text = '' OR w.activity_type = $4)
+	  AND ($7::timestamptz IS NULL OR (w.start_ts,w.uuid)<($7,$8::uuid))
 	ORDER BY w.start_ts DESC, w.uuid DESC
 	LIMIT $5::bigint OFFSET $6`
 
-// StreamWorkouts calls fn once per workout matching filters, newest first,
-// never holding more than one row. A Limit of zero or less means every
-// match — what the export passes; Workouts passes the endpoint's page size.
-// fn's error stops the scan and comes back unchanged.
+// StreamWorkouts rechecks live authority between bounded pages, newest first.
 func (st *Store) StreamWorkouts(ctx context.Context, userID string, filters WorkoutFilters, fn func(WorkoutSummary) error) error {
+	var after *readCursor
+	sent, offset := 0, filters.Offset
+	for {
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		pageFilters := filters
+		pageFilters.Limit, pageFilters.Offset = readPageSize, offset
+		if filters.Limit > 0 {
+			if sent >= filters.Limit {
+				return nil
+			}
+			pageFilters.Limit = min(readPageSize, filters.Limit-sent)
+		}
+		page, next, err := st.workoutPage(ctx, userID, pageFilters, after)
+		if err != nil {
+			return err
+		}
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		for _, workout := range page {
+			if err := fn(workout); err != nil {
+				return err
+			}
+		}
+		sent += len(page)
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		if len(page) < pageFilters.Limit {
+			return nil
+		}
+		after, offset = next, 0
+	}
+}
+
+func (st *Store) workoutPage(ctx context.Context, userID string, filters WorkoutFilters, after *readCursor) ([]WorkoutSummary, *readCursor, error) {
+	var afterAt, afterID any
+	if after != nil {
+		afterAt, afterID = after.at, after.id
+	}
 	rows, err := st.readDB(ctx).Query(ctx, workoutSummarySQL,
 		userID,
 		filters.Start,
 		filters.End,
 		filters.ActivityType,
-		nullableLimit(filters.Limit),
+		filters.Limit,
 		filters.Offset,
+		afterAt,
+		afterID,
 	)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
+	out := make([]WorkoutSummary, 0, filters.Limit)
+	var last *readCursor
 	for rows.Next() {
-		summary, err := scanWorkoutSummary(rows)
+		summary, cursor, err := scanWorkoutSummary(rows)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		if err := fn(summary); err != nil {
-			return err
-		}
+		out = append(out, summary)
+		last = &cursor
 	}
-	return rows.Err()
+	return out, last, rows.Err()
 }
 
 func (st *Store) Workouts(ctx context.Context, userID string, filters WorkoutFilters) ([]WorkoutSummary, error) {
@@ -529,7 +572,7 @@ func (st *Store) Workout(ctx context.Context, userID, uuid string) (*WorkoutDeta
 
 func scanWorkoutSummary(scanner interface {
 	Scan(dest ...any) error
-}) (WorkoutSummary, error) {
+}) (WorkoutSummary, readCursor, error) {
 	var (
 		summary    WorkoutSummary
 		start, end time.Time
@@ -545,11 +588,11 @@ func scanWorkoutSummary(scanner interface {
 		&summary.HasRoute,
 		&summary.AvailableMetrics,
 	); err != nil {
-		return WorkoutSummary{}, err
+		return WorkoutSummary{}, readCursor{}, err
 	}
 	summary.Start = start.UTC().UnixMilli()
 	summary.End = end.UTC().UnixMilli()
-	return summary, nil
+	return summary, readCursor{at: start, id: summary.UUID}, nil
 }
 
 func scanWorkoutSummaryRow(

@@ -56,12 +56,18 @@ Catalog caches are keyed by member and opaque credential hash. Two credentials
 for one member cannot share results. Background refreshes open a fresh scoped
 transaction and recheck live authority before reading.
 
+Raw-sample and workout streams read at most 256 rows per statement. Their
+cursor uses the original database timestamp and UUID, preserving microsecond
+order. Each page closes its database rows before checking the signature and
+live parent again. A committed revocation stops the stream; a response that
+already started aborts its transfer instead of ending as a complete file.
+
 Integration authorization tests use real api_reader connections, signatures
 and HTTP. Legacy calendar and SQL math tests use the separate read-only
 grafana reference role through REFERENCE_DATABASE_URL. They do not prove
 personal authorization. The fixture writer alone uses ADMIN_DATABASE_URL.
 
-Family Health T07 remains incomplete. Streaming page checks, the full old
-configuration and bootstrap chain, forced Web accounts, browser behavior,
+Family Health T07 remains incomplete. The full old configuration and
+bootstrap chain, forced Web accounts, browser behavior,
 and final regression and restore checks remain pending. The branch is not
 approved for deployment or real health data.

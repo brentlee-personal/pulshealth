@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,18 @@ import (
 
 const apiVectorSeed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 const defaultUserID = "5ea4d000-0000-4000-8000-000000000001"
+
+func TestStoreAuthorityErrorsClosePersonalReads(t *testing.T) {
+	for _, test := range []struct {
+		err    error
+		status int
+	}{{errAPICredential, http.StatusUnauthorized}, {errAPIAuthority, http.StatusServiceUnavailable}} {
+		response := serveAuthorized(t, testServer(t, &fakeStore{err: test.err}), http.MethodGet, "/v1/profile", nil)
+		if response.Code != test.status {
+			t.Fatalf("personal read failure status=%d, want %d", response.Code, test.status)
+		}
+	}
+}
 
 // Handler-only tests inject personal authority; integration authority tests use real signatures and storage.
 func testAuthorize(token, member string, extraTypes ...string) func(context.Context, string) (*apiAuthority, error) {

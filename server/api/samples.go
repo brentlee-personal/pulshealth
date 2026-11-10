@@ -91,12 +91,50 @@ func (st *Store) SampleType(ctx context.Context, identifier string) (SampleMeta,
 	return meta, nil
 }
 
-// StreamSamples calls fn once per raw sample of meta's type inside
-// [f.Start, f.End), ordered by start time, never holding more than one row —
-// the export streams hundreds of thousands of them. A Limit of zero or less
-// means every matching row; Samples passes the endpoint's page size. fn's
-// error stops the scan and comes back unchanged.
+// StreamSamples bounds each database snapshot and rechecks authority before emission.
 func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMeta, f SampleFilters, fn func(Sample) error) error {
+	var after *readCursor
+	sent, offset := 0, f.Offset
+	for {
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		pageFilters := f
+		pageFilters.Limit, pageFilters.Offset = readPageSize, offset
+		if f.Limit > 0 {
+			if sent >= f.Limit {
+				return nil
+			}
+			pageFilters.Limit = min(readPageSize, f.Limit-sent)
+		}
+		page, next, err := st.samplePage(ctx, userID, meta, pageFilters, after)
+		if err != nil {
+			return err
+		}
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		for _, sample := range page {
+			if err := fn(sample); err != nil {
+				return err
+			}
+		}
+		sent += len(page)
+		if err := st.checkReadScope(ctx); err != nil {
+			return err
+		}
+		if len(page) < pageFilters.Limit {
+			return nil
+		}
+		after, offset = next, 0
+	}
+}
+
+func (st *Store) samplePage(ctx context.Context, userID string, meta SampleMeta, f SampleFilters, after *readCursor) ([]Sample, *readCursor, error) {
+	var afterAt, afterID any
+	if after != nil {
+		afterAt, afterID = after.at, after.id
+	}
 	var (
 		rows pgx.Rows
 		err  error
@@ -111,9 +149,10 @@ func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMe
 			  AND q.type_id = $2
 			  AND q.start_ts >= $3
 			  AND q.start_ts < $4
+			  AND ($7::timestamptz IS NULL OR (q.start_ts,q.uuid)>($7,$8::uuid))
 			ORDER BY q.start_ts, q.uuid
 			LIMIT $5 OFFSET $6`,
-			userID, meta.TypeID, f.Start, f.End, nullableLimit(f.Limit), f.Offset)
+			userID, meta.TypeID, f.Start, f.End, f.Limit, f.Offset, afterAt, afterID)
 	case "category":
 		// Category values are only meaningful with their type; the label
 		// join is keyed on the identifier so the same integer decodes
@@ -127,17 +166,20 @@ func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMe
 			  AND c.type_id = $2
 			  AND c.start_ts >= $3
 			  AND c.start_ts < $4
+			  AND ($8::timestamptz IS NULL OR (c.start_ts,c.uuid)>($8,$9::uuid))
 			ORDER BY c.start_ts, c.uuid
 			LIMIT $5 OFFSET $6`,
-			userID, meta.TypeID, f.Start, f.End, nullableLimit(f.Limit), f.Offset, meta.Type)
+			userID, meta.TypeID, f.Start, f.End, f.Limit, f.Offset, meta.Type, afterAt, afterID)
 	default:
-		return badRequestf("type %q is a %s type; only quantity and category samples are served here (workouts have /v1/workouts)", meta.Type, meta.Kind)
+		return nil, nil, badRequestf("type %q is a %s type; only quantity and category samples are served here (workouts have /v1/workouts)", meta.Type, meta.Kind)
 	}
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
+	out := make([]Sample, 0, f.Limit)
+	var last *readCursor
 	for rows.Next() {
 		var (
 			s          Sample
@@ -148,15 +190,14 @@ func (st *Store) StreamSamples(ctx context.Context, userID string, meta SampleMe
 			dest = append(dest, &s.Label)
 		}
 		if err := rows.Scan(dest...); err != nil {
-			return err
+			return nil, nil, err
 		}
 		s.Start = start.UTC().UnixMilli()
 		s.End = end.UTC().UnixMilli()
-		if err := fn(s); err != nil {
-			return err
-		}
+		out = append(out, s)
+		last = &readCursor{at: start, id: s.UUID}
 	}
-	return rows.Err()
+	return out, last, rows.Err()
 }
 
 // Samples collects one page of StreamSamples into the endpoint's envelope.
