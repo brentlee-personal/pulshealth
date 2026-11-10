@@ -1,4 +1,4 @@
-import { healthResource, oauthResources } from "@/lib/oauth/config";
+import { oauthResources } from "@/lib/oauth/config";
 import type { NextRequest } from "next/server";
 
 import { requestIp } from "@/lib/accounts/http";
