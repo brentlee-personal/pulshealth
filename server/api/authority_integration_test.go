@@ -13,6 +13,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
@@ -156,6 +158,67 @@ func TestIntegrationAPIAuthorityLiveDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(nil)
+	t.Run("record scope", func(t *testing.T) {
+		stepType, dropStep := ensureSampleType(t, ctx, admin, "HKQuantityTypeIdentifierStepCount", "quantity", ptrString("count"))
+		defer dropStep()
+		heartType, dropHeart := ensureSampleType(t, ctx, admin, "HKQuantityTypeIdentifierHeartRate", "quantity", ptrString("count/min"))
+		defer dropHeart()
+		if _, err := admin.Exec(ctx, `INSERT INTO public.quantity_samples(uuid,type_id,start_ts,end_ts,value,user_id) VALUES
+			($1,$4,'2026-01-15T12:00:00Z','2026-01-15T12:00:00Z',11,$6),
+			($2,$4,'2026-03-15T12:00:00Z','2026-03-15T12:00:00Z',999,$6),
+			($3,$5,'2026-01-15T12:00:00Z','2026-01-15T12:00:00Z',88,$6)`,
+			fixtureUUID("aadd5000", nonce, 0), fixtureUUID("aadd5000", nonce, 1), fixtureUUID("aadd5000", nonce, 2), stepType, heartType, member); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _, _ = admin.Exec(ctx, "DELETE FROM public.quantity_samples WHERE user_id=$1", member) }()
+		read := func(t *testing.T, target string) *http.Response {
+			t.Helper()
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+bearer)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		for name, target := range map[string]string{
+			"raw operation":  "/v1/samples?type=HKQuantityTypeIdentifierStepCount&start=1768435200000&end=1768521600000",
+			"another type":   "/v1/metrics/latest?types=HKQuantityTypeIdentifierHeartRate",
+			"another period": "/v1/metrics/daily?types=HKQuantityTypeIdentifierStepCount&start=1769904000000&end=1769990400000",
+			"another member": "/v1/metrics/latest?types=HKQuantityTypeIdentifierStepCount&user=" + other,
+			"profile":        "/v1/profile",
+			"export":         "/v1/export?dataset=daily_metrics&format=csv&types=HKQuantityTypeIdentifierStepCount&start=1768435200000&end=1768521600000",
+		} {
+			t.Run(name, func(t *testing.T) {
+				response := read(t, target)
+				defer response.Body.Close()
+				if response.StatusCode != http.StatusForbidden {
+					t.Fatalf("personal credential reached outside its %s: HTTP %d, want 403", name, response.StatusCode)
+				}
+			})
+		}
+		t.Run("latest input period", func(t *testing.T) {
+			response := read(t, "/v1/metrics/latest?types=HKQuantityTypeIdentifierStepCount")
+			defer response.Body.Close()
+			var body struct {
+				Metrics []LatestMetric `json:"metrics"`
+			}
+			if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&body) != nil || len(body.Metrics) != 1 || body.Metrics[0].Value == nil || *body.Metrics[0].Value != 11 {
+				t.Fatal("latest metric used a synthetic sample outside the signed UTC range")
+			}
+		})
+		t.Run("direct base table", func(t *testing.T) {
+			var value int
+			err := store.pool.QueryRow(ctx, "SELECT 1 FROM public.quantity_samples LIMIT 1").Scan(&value)
+			var denied *pgconn.PgError
+			if !errors.As(err, &denied) || denied.Code != "42501" {
+				t.Fatal("API database role could read a health base table directly")
+			}
+		})
+	})
 	if _, err := admin.Exec(ctx, "UPDATE auth.accounts SET disabled_at=now() WHERE id=$1", account); err != nil {
 		t.Fatal(err)
 	}
