@@ -430,7 +430,7 @@ func TestOpenAPIDocumentsTheMiddlewareStatuses(t *testing.T) {
 	}
 
 	// And the router really answers those statuses on an authenticated route.
-	scoped := scopedServer(t, &fakeStore{}, defaultUserID, false)
+	scoped := scopedServer(t, &fakeStore{}, defaultUserID)
 	rec := serveAuthorized(t, scoped, http.MethodGet, "/v1/profile?user=7b1e4c2a-9d3f-4e5a-8b6c-0f1d2e3a4b5c", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("?user= for someone else with the gate off = %d, want 403", rec.Code)
