@@ -207,10 +207,10 @@ func TestIntegration_CategoryLabelsJoin(t *testing.T) {
 	run := time.Now().UnixNano()
 	sampleUUID := fmt.Sprintf("%08x-0101-4000-8000-%012x", run>>32, run&0xffffffffffff)
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO category_samples (uuid, type_id, start_ts, end_ts, value, source_id, metadata)
-		VALUES ($1, $2, '2024-06-10T00:00:00Z', '2024-06-10T01:00:00Z', 3, $3, '{}'::jsonb)
+		INSERT INTO category_samples (uuid, type_id, start_ts, end_ts, value, source_id, metadata, user_id)
+		VALUES ($1, $2, '2024-06-10T00:00:00Z', '2024-06-10T01:00:00Z', 3, $3, '{}'::jsonb, $4)
 		ON CONFLICT DO NOTHING`,
-		sampleUUID, typeID, sourceID); err != nil {
+		sampleUUID, typeID, sourceID, referenceMemberID); err != nil {
 		t.Fatalf("insert category sample: %v", err)
 	}
 
@@ -1014,13 +1014,13 @@ func TestIntegration_DeletionsOnCompressedChunk(t *testing.T) {
 		t.Fatalf("seed type: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO quantity_samples (uuid, type_id, start_ts, end_ts, value)
+		INSERT INTO quantity_samples (uuid, type_id, start_ts, end_ts, value, user_id)
 		SELECT gen_random_uuid(),
 		       (SELECT type_id FROM sample_types WHERE identifier = $1),
 		       $2::timestamptz + (i || ' seconds')::interval,
 		       $2::timestamptz + (i || ' seconds')::interval,
-		       i
-		FROM generate_series(1, 150000) i`, typeIdent, monthStart); err != nil {
+		       i, $3::uuid
+		FROM generate_series(1, 150000) i`, typeIdent, monthStart, referenceMemberID); err != nil {
 		t.Fatalf("seed samples: %v", err)
 	}
 	// Compress every chunk holding the seeded rows. This needs the hypertable

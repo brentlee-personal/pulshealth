@@ -1087,7 +1087,8 @@ func TestHandleUUIDs_RangeGuard(t *testing.T) {
 	}
 }
 
-func TestHandleRoutes_ParamsAndResponse(t *testing.T) {
+// Handler formatting only; HTTP sync credentials are refused separately below.
+func TestRouteListHandlerFormatsOwnedData(t *testing.T) {
 	fs := &fakeStore{routesRes: []RouteSummary{{
 		UUID:            "11111111-1111-4111-8111-111111111111",
 		StartTs:         "2026-06-01T15:00:00Z",
@@ -1101,7 +1102,8 @@ func TestHandleRoutes_ParamsAndResponse(t *testing.T) {
 	req := httptest.NewRequest("GET", "/v1/routes?start=2026-06-01&limit=12&offset=3&minDistanceM=1000", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
+	req = req.WithContext(withPrincipal(req.Context(), principal{userID: referenceMemberID}))
+	srv.handleRoutes(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -1124,13 +1126,14 @@ func TestHandleRoutes_ParamsAndResponse(t *testing.T) {
 	req = httptest.NewRequest("GET", "/v1/routes?start=not-a-date", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec = httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
+	req = req.WithContext(withPrincipal(req.Context(), principal{userID: referenceMemberID}))
+	srv.handleRoutes(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad start status = %d, want 400", rec.Code)
 	}
 }
 
-func TestHandleRouteAndMetrics(t *testing.T) {
+func TestRouteDetailHandlersFormatOwnedData(t *testing.T) {
 	uuid := "11111111-1111-4111-8111-111111111111"
 	fs := &fakeStore{
 		routeRes: &RouteDetail{Workout: RouteSummary{UUID: uuid}, Points: []RouteGPSPoint{{Ts: "2026-06-01T15:00:00Z", Lat: 37, Lon: -122}}},
@@ -1144,7 +1147,9 @@ func TestHandleRouteAndMetrics(t *testing.T) {
 	req := httptest.NewRequest("GET", "/v1/routes/"+uuid, nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
+	req.SetPathValue("uuid", uuid)
+	req = req.WithContext(withPrincipal(req.Context(), principal{userID: referenceMemberID}))
+	srv.handleRoute(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("detail status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -1155,7 +1160,9 @@ func TestHandleRouteAndMetrics(t *testing.T) {
 	req = httptest.NewRequest("GET", "/v1/routes/"+uuid+"/metrics", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec = httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
+	req.SetPathValue("uuid", uuid)
+	req = req.WithContext(withPrincipal(req.Context(), principal{userID: referenceMemberID}))
+	srv.handleRouteMetrics(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -1170,31 +1177,35 @@ func TestHandleRouteAndMetrics(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedReadsUseRequestedUser(t *testing.T) {
-	userID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+func TestAuthenticatedReadsUseCredentialMember(t *testing.T) {
 	uuid := "11111111-1111-4111-8111-111111111111"
-	targets := []string{
+	for _, target := range []string{
 		"/v1/stats",
 		"/v1/digest?type=x&from=1700000000000&to=1700000001000",
 		"/v1/uuids?type=x&from=1700000000000&to=1700000001000",
-		"/v1/routes",
-		"/v1/routes/" + uuid,
-		"/v1/routes/" + uuid + "/metrics",
-	}
-	for _, target := range targets {
+		"/v1/routes", "/v1/routes/" + uuid, "/v1/routes/" + uuid + "/metrics",
+	} {
 		t.Run(target, func(t *testing.T) {
 			fs := &fakeStore{}
-			srv := newTestServer(fs)
+			srv, _ := newDeviceTestServer(fs)
 			req := httptest.NewRequest(http.MethodGet, target, nil)
-			req.Header.Set("Authorization", "Bearer secret")
-			req.Header.Set("X-User-ID", userID)
+			req.Header.Set("Authorization", "Bearer "+activeTok)
+			req.Header.Set("X-User-ID", deviceUser)
 			rec := httptest.NewRecorder()
 			srv.routes().ServeHTTP(rec, req)
-			if rec.Code >= 500 {
-				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			if strings.HasPrefix(target, "/v1/routes") {
+				if rec.Code != http.StatusForbidden || fs.gotUserID != "" {
+					t.Fatal("sync credential reached route health data")
+				}
+			} else if rec.Code != http.StatusOK || fs.gotUserID != deviceUser {
+				t.Fatalf("status/member = %d/%q, want 200 and credential owner", rec.Code, fs.gotUserID)
 			}
-			if fs.gotUserID != userID {
-				t.Fatalf("store user = %q, want %q", fs.gotUserID, userID)
+			fs.gotUserID = ""
+			req.Header.Set("X-User-ID", otherUser)
+			rec = httptest.NewRecorder()
+			srv.routes().ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || fs.gotUserID != "" {
+				t.Fatal("a client header changed the credential member")
 			}
 		})
 	}
